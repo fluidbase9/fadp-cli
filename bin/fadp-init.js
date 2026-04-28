@@ -10,6 +10,11 @@ const { execSync }  = require("child_process");
 const https         = require("https");
 const http          = require("http");
 
+// When run via postinstall, npm sets INIT_CWD to the user's project root.
+// When run via npx/fadp directly, cwd is already the project root.
+const PROJECT_DIR = process.env.INIT_CWD || process.cwd();
+process.chdir(PROJECT_DIR);
+
 // ─── ANSI ─────────────────────────────────────────────────────────────────────
 
 const C = {
