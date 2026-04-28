@@ -341,6 +341,35 @@ function writeEnvSnippet(keyName, privateKeyJson) {
   ok(`Wrote   ${C.cyan}.env.fadp${C.reset}  ${C.dim}(chmod 600 — keep secret)${C.reset}`);
 }
 
+// ─── Mode selector ────────────────────────────────────────────────────────────
+
+async function selectMode() {
+  const modes = [
+    {
+      key:   "1",
+      title: `${C.bold}${C.cyan}Install FADP in my existing project${C.reset}`,
+      desc:  `${C.gray}Generate keys + add fluid-fadp to package.json. No sample project.${C.reset}`,
+    },
+    {
+      key:   "2",
+      title: `${C.bold}${C.white}Scaffold a full TypeScript project${C.reset}`,
+      desc:  `${C.gray}Keys + agent skills + sample server/agent project ready to run.${C.reset}`,
+    },
+  ];
+
+  log(`  ${C.bold}What would you like to do?${C.reset}`);
+  nl();
+  for (const m of modes) log(`  ${C.cyan}[${m.key}]${C.reset}  ${m.title}`);
+  for (const m of modes) log(`       ${m.desc}`);
+  nl();
+
+  while (true) {
+    const ans = await prompt(`Choose ${C.cyan}1${C.reset} or ${C.cyan}2${C.reset}`);
+    if (ans === "1" || ans === "2") return ans;
+    warn("Enter 1 or 2");
+  }
+}
+
 // ─── Banner ───────────────────────────────────────────────────────────────────
 
 function banner() {
@@ -350,21 +379,11 @@ function banner() {
   log(`${C.gray}  Fluid Agentic Developer Protocol · fluidnative.com/fadp${C.reset}`);
   log(hr("═"));
   nl();
-  log(`  This wizard will:`);
-  log(`  ${C.green}1.${C.reset} Create your developer account`);
-  log(`  ${C.green}2.${C.reset} Generate an FLDP EC P-256 key pair ${C.dim}(shown once)${C.reset}`);
-  log(`  ${C.green}3.${C.reset} Clone the Fluid agent skills repo`);
-  log(`  ${C.green}4.${C.reset} Let you select which agent skills to install`);
-  log(`  ${C.green}5.${C.reset} Scaffold a sample FADP project ${C.dim}(server + paying agent)${C.reset}`);
-  nl();
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Shared: account + key steps ─────────────────────────────────────────────
 
-async function main() {
-  banner();
-
-  // ── Step 1: Account ──────────────────────────────────────────────────────────
+async function stepAccountAndKeys() {
   step(1, "Developer Account");
   log(`  ${C.dim}Create a new Fluid developer account, or sign in if you already have one.${C.reset}`);
   nl();
@@ -374,21 +393,15 @@ async function main() {
   nl();
 
   log(`  ${C.dim}Registering…${C.reset}`);
-  let uid = null;
   try {
     const res = await apiPost("/api/auth/register-developer", { email, password });
     if (res.success || res.uid) {
-      uid = res.uid;
       ok("Developer account created");
     } else if (res.error && res.error.toLowerCase().includes("exist")) {
       warn("Account already exists — signing in");
       const loginRes = await apiPost("/api/auth/login-developer", { email, password });
-      if (loginRes.success || loginRes.uid) {
-        uid = loginRes.uid;
-        ok("Signed in to existing account");
-      } else {
-        fail(`Login failed: ${loginRes.error || "unknown error"}`);
-      }
+      if (loginRes.success || loginRes.uid) ok("Signed in to existing account");
+      else fail(`Login failed: ${loginRes.error || "unknown error"}`);
     } else {
       warn(`API response: ${res.error || JSON.stringify(res)}`);
     }
@@ -396,19 +409,16 @@ async function main() {
     warn(`Could not reach API (${e.message}). Continuing offline.`);
   }
 
-  // ── Step 2: FLDP Key Pair ─────────────────────────────────────────────────
   step(2, "FLDP EC Key Pair");
-
   log(`  ${C.dim}Generating P-256 ECDSA key pair in this terminal…${C.reset}`);
   nl();
+
   const { keyName, publicKeyPem, privateKeyJson } = await generateFLDPKeyPair(email);
 
-  // Register public key with server (non-blocking, fire-and-forget)
   apiPost("/api/developer/fldp-keys/register", {
     email, keyName, publicKeyPem, label: "CLI Generated",
   }).catch(() => {});
 
-  // Display the key — ONCE
   log(hr());
   nl();
   warn(`${C.bold}${C.yellow}SHOWN ONCE — copy and save NOW. This will not be displayed again.${C.reset}`);
@@ -417,66 +427,120 @@ async function main() {
   nl();
   label("FLDP_API_KEY_PRIVATE_KEY", `${C.yellow}(shown below)${C.reset}`);
   nl();
-  const jsonStr = JSON.stringify(privateKeyJson, null, 2);
-  const lines   = jsonStr.split("\n");
-  for (const line of lines) log(`  ${C.gray}${line}${C.reset}`);
+  for (const line of JSON.stringify(privateKeyJson, null, 2).split("\n"))
+    log(`  ${C.gray}${line}${C.reset}`);
   nl();
   log(hr());
   nl();
 
-  // Write .env.fadp automatically
   writeEnvSnippet(keyName, privateKeyJson);
   nl();
-  log(`  ${C.dim}Your key was also written to ${C.reset}${C.cyan}.env.fadp${C.reset}${C.dim} in this directory.${C.reset}`);
-  log(`  ${C.dim}Add it to your project's${C.reset} ${C.white}.gitignore${C.reset}${C.dim} immediately.${C.reset}`);
+  log(`  ${C.dim}Keys also written to ${C.reset}${C.cyan}.env.fadp${C.reset}${C.dim} — add it to .gitignore.${C.reset}`);
+  nl();
+  await pressEnter("I have saved my key — press ENTER to continue");
+
+  return { email, keyName };
+}
+
+// ─── Mode 1: install only ─────────────────────────────────────────────────────
+
+async function runModeInstall() {
+  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Install FADP in existing project${C.reset}\n`);
+
+  const { keyName } = await stepAccountAndKeys();
+
+  // Add fluid-fadp to project dependencies
+  step(3, "Install fluid-fadp");
+  log(`  ${C.dim}Adding fluid-fadp to your project…${C.reset}`);
+  nl();
+  try {
+    execSync("npm install fluid-fadp", { stdio: "pipe", cwd: process.cwd() });
+    ok(`${C.cyan}fluid-fadp${C.reset} installed`);
+  } catch {
+    warn("npm install failed — run manually: npm install fluid-fadp");
+  }
   nl();
 
-  await pressEnter(`I have saved my key — press ENTER to continue`);
+  // Show usage snippet
+  log(hr());
+  nl();
+  log(`  ${C.bold}${C.white}Quick start — add to your Express server:${C.reset}`);
+  nl();
+  log(`  ${C.gray}const { fadpGate } = require("fluid-fadp/server");${C.reset}`);
+  nl();
+  log(`  ${C.gray}app.get("/api/data", fadpGate({${C.reset}`);
+  log(`  ${C.gray}  keyName: "${keyName}",${C.reset}`);
+  log(`  ${C.gray}  amount:  "0.01",        // USDC per call${C.reset}`);
+  log(`  ${C.gray}}), (req, res) => {${C.reset}`);
+  log(`  ${C.gray}  res.json({ data: "paid access!" });${C.reset}`);
+  log(`  ${C.gray}});${C.reset}`);
+  nl();
+  log(hr());
+  nl();
 
-  // ── Step 3: Clone Skills Repo ─────────────────────────────────────────────
+  log(hr("═"));
+  log(`${C.bold}${C.green}  ✓  FADP installed!${C.reset}`);
+  log(hr("═"));
+  nl();
+  label("1. Protect keys",      `${C.dim}echo '.env.fadp' >> .gitignore${C.reset}`);
+  label("2. Load keys in .env", `${C.dim}cp .env.fadp .env${C.reset}`);
+  label("3. npm package",       `${C.cyan}https://www.npmjs.com/package/fluid-fadp${C.reset}`);
+  label("4. Docs",              `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
+  nl();
+}
+
+// ─── Mode 2: full TypeScript project ─────────────────────────────────────────
+
+async function runModeProject() {
+  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Scaffold full TypeScript project${C.reset}\n`);
+
+  const { email, keyName } = await stepAccountAndKeys();
+
   step(3, "Clone Agent Skills Repo");
   log(`  ${C.dim}Repo: ${SKILLS_REPO}${C.reset}`);
   nl();
   cloneSkillsRepo();
   nl();
 
-  // ── Step 4: Select Skills ─────────────────────────────────────────────────
   step(4, "Select Agent Skills to Install");
   log(`  ${C.dim}Choose which Fluid agent skills to symlink into ${C.reset}${C.cyan}./agents/${C.reset}`);
-
   const chosen = await multiSelect(AGENT_SKILLS);
-
   nl();
   if (chosen.length === 0) {
     warn("No skills selected. Run `fadp` again to install skills.");
   } else {
     const linked = symlinkSkills(chosen);
     nl();
-    ok(`${C.bold}${linked} agent skill${linked === 1 ? "" : "s"} installed to ./agents/${C.reset}`);
+    ok(`${C.bold}${linked} skill${linked === 1 ? "" : "s"} installed to ./agents/${C.reset}`);
   }
 
-  // ── Step 5: Scaffold sample project ─────────────────────────────────────────
-  step(5, "Sample Project");
-  log(`  ${C.dim}Scaffolding fadp-sample/ — a gated API server + paying agent.${C.reset}`);
+  step(5, "Sample TypeScript Project");
+  log(`  ${C.dim}Scaffolding fadp-sample/ — gated API server + paying agent.${C.reset}`);
   nl();
   scaffoldSampleProject(keyName);
   nl();
 
-  // ── Done ──────────────────────────────────────────────────────────────────
-  nl();
   log(hr("═"));
-  log(`${C.bold}${C.green}  ✓  FADP setup complete!${C.reset}`);
+  log(`${C.bold}${C.green}  ✓  FADP project ready!${C.reset}`);
   log(hr("═"));
   nl();
-  log(`  ${C.bold}Next steps:${C.reset}`);
+  label("1. Protect keys",          `${C.dim}echo '.env.fadp' >> .gitignore${C.reset}`);
+  label("2. Install dependencies",  `${C.cyan}cd fadp-sample && npm install${C.reset}`);
+  label("3. Start gated server",    `${C.dim}node fadp-sample/server.js${C.reset}`);
+  label("4. Run paying agent",      `${C.dim}node fadp-sample/agent.js${C.reset}`);
+  label("5. Browse agent skills",   `${C.dim}ls ./agents/${C.reset}`);
+  label("6. Protocol package",      `${C.cyan}https://www.npmjs.com/package/fluid-fadp${C.reset}`);
+  label("7. Docs",                  `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
   nl();
-  label("1. Protect your keys",       `${C.dim}echo '.env.fadp' >> .gitignore${C.reset}`);
-  label("2. Try the sample project",  `${C.cyan}cd fadp-sample && npm install${C.reset}`);
-  label("3. Start the gated server",  `${C.dim}node fadp-sample/server.js${C.reset}`);
-  label("4. Run the paying agent",    `${C.dim}node fadp-sample/agent.js${C.reset}`);
-  label("5. Browse agent skills",     `${C.dim}ls ./agents/${C.reset}`);
-  label("6. Docs",                    `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
-  nl();
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  banner();
+  const mode = await selectMode();
+  if (mode === "1") await runModeInstall();
+  else              await runModeProject();
 }
 
 main().catch(e => {
