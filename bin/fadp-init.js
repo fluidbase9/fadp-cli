@@ -375,15 +375,9 @@ async function selectMode() {
   }
 }
 
-// ─── Logo (iTerm2 / WezTerm inline image, emoji fallback) ────────────────────
+// ─── Logo ─────────────────────────────────────────────────────────────────────
 
 const LOGO_URL = "https://fluidspot.s3.us-east-2.amazonaws.com/web/Base/media_files/fluid23.png";
-
-function supportsInlineImages() {
-  const p = process.env.TERM_PROGRAM || "";
-  return p === "iTerm.app" || p === "WezTerm" || p === "Hyper" ||
-         !!process.env.ITERM_SESSION_ID || !!process.env.WEZTERM_EXECUTABLE;
-}
 
 function fetchBuffer(url) {
   return new Promise((resolve, reject) => {
@@ -397,17 +391,24 @@ function fetchBuffer(url) {
 }
 
 async function printLogo() {
-  if (!supportsInlineImages()) return false;
   try {
-    const buf = await fetchBuffer(LOGO_URL);
+    const buf = await Promise.race([
+      fetchBuffer(LOGO_URL),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
+    ]);
     const b64 = buf.toString("base64");
-    // iTerm2 / WezTerm inline image protocol — 6 cols wide, auto height
+
+    // Try iTerm2 / WezTerm / Hyper protocol
     process.stdout.write(
-      `\x1b]1337;File=inline=1;width=6;height=3;preserveAspectRatio=1:${b64}\x07\n`
+      `\x1b]1337;File=inline=1;width=8;height=4;preserveAspectRatio=1:${b64}\x07\n`
     );
-    return true;
+
+    // Try Kitty terminal graphics protocol as well
+    process.stdout.write(
+      `\x1b_Ga=T,f=100,m=0,q=2:${b64}\x1b\\\n`
+    );
   } catch {
-    return false;
+    // silently skip — emoji fallback in banner
   }
 }
 
@@ -416,8 +417,8 @@ async function printLogo() {
 async function banner() {
   nl();
   log(hr("═"));
-  const logoShown = await printLogo();
-  log(`${C.bold}${C.cyan}  ${logoShown ? "" : "🌊  "}Fluid Wallet — FADP Developer Setup${C.reset}`);
+  await printLogo();
+  log(`${C.bold}${C.cyan}  🌊  Fluid Wallet — FADP Developer Setup${C.reset}`);
   log(`${C.gray}  Fluid Agentic Developer Protocol · fluidnative.com/fadp${C.reset}`);
   log(hr("═"));
   nl();
