@@ -375,21 +375,52 @@ async function selectMode() {
   }
 }
 
-// ─── Logo (ANSI block art — works in every terminal) ─────────────────────────
+// ─── Logo ─────────────────────────────────────────────────────────────────────
 
-function printLogo() {
-  const T  = "\x1b[36m";
-  const G  = "\x1b[32m";
-  const R  = "\x1b[0m";
-  const B  = "\x1b[1m";
-  const D  = "\x1b[2m";
+const LOGO_PATH = path.join(__dirname, "fluid23.png");
 
-  log(`  ${G}  ██████╗ ${T} ███████╗${R}`);
-  log(`  ${G}  ██╔══██╗${T} ██╔════╝${R}   ${B}${T}FLUID WALLET${R}`);
-  log(`  ${G}  ██████╔╝${T} █████╗  ${R}   ${T}FADP Developer CLI${R}`);
-  log(`  ${G}  ██╔══██╗${T} ██╔══╝  ${R}   ${D}fluidnative.com/fadp${R}`);
-  log(`  ${G}  ██║  ██║${T} ██║     ${R}`);
-  log(`  ${G}  ╚═╝  ╚═╝${T} ╚═╝     ${R}`);
+function printLogoAnsi() {
+  const T = "\x1b[38;5;80m";   // brand teal
+  const B = "\x1b[1m";
+  const D = "\x1b[2m";
+  const R = "\x1b[0m";
+
+  log(`  ${T}   ▄████████▄   ${R}`);
+  log(`  ${T}  ████████████  ${R}   ${B}FLUID WALLET${R}`);
+  log(`  ${T} ████        ████${R}  ${T}FADP Developer CLI${R}`);
+  log(`  ${T} ████        ████${R}  ${D}fluidnative.com/fadp${R}`);
+  log(`  ${T} ████        ████${R}`);
+  log(`  ${T}  ████████████  ${R}`);
+  log(`  ${T}   ▀████████▀   ${R}`);
+}
+
+async function printLogo() {
+  const term  = process.env.TERM_PROGRAM || "";
+  const isIT  = /iterm/i.test(term) || !!process.env.ITERM_SESSION_ID;
+  const isKit = term === "xterm-kitty" || !!process.env.KITTY_WINDOW_ID;
+
+  if ((isIT || isKit) && fs.existsSync(LOGO_PATH)) {
+    try {
+      const b64 = fs.readFileSync(LOGO_PATH).toString("base64");
+      if (isIT) {
+        process.stdout.write(
+          `\x1b]1337;File=inline=1;width=14;preserveAspectRatio=1:${b64}\x07\n`
+        );
+      } else {
+        // Kitty graphics protocol — chunked
+        const chunks = b64.match(/.{1,4096}/g) || [];
+        for (let i = 0; i < chunks.length; i++) {
+          const m = i < chunks.length - 1 ? 1 : 0;
+          process.stdout.write(`\x1b_Ga=T,f=100,m=${m};${chunks[i]}\x1b\\\n`);
+        }
+      }
+      log(`  \x1b[1mFLUID WALLET\x1b[0m`);
+      log(`  \x1b[38;5;80mFADP Developer CLI\x1b[0m`);
+      log(`  \x1b[2mfluidnative.com/fadp\x1b[0m`);
+      return;
+    } catch { /* fall through */ }
+  }
+  printLogoAnsi();
 }
 
 // ─── Banner ───────────────────────────────────────────────────────────────────
@@ -398,7 +429,7 @@ async function banner() {
   nl();
   log(hr("═"));
   nl();
-  printLogo();
+  await printLogo();
   nl();
   log(hr("═"));
   nl();
