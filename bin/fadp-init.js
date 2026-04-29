@@ -378,14 +378,13 @@ async function selectMode() {
 // ─── Logo ─────────────────────────────────────────────────────────────────────
 
 function printLogo() {
-  const T = "\x1b[38;5;80m";
-  const B = "\x1b[1m";
-  const D = "\x1b[2m";
-  const R = "\x1b[0m";
+  const TQ = "\x1b[38;2;72;209;204m";  // exact #48d1cc
+  const D  = "\x1b[2m";
+  const R  = "\x1b[0m";
 
   nl();
-  log(`  ${B}${T}FLUID WALLET${R}`);
-  log(`  ${T}FADP Developer CLI${R}`);
+  log(`  \x1b[1m${TQ}FLUID WALLET${R}`);
+  log(`  ${TQ}FADP Developer CLI${R}`);
   log(`  ${D}fluidnative.com/fadp${R}`);
   nl();
 }
