@@ -481,7 +481,47 @@ async function stepAccountAndKeys() {
   nl();
   await pressEnter("I have saved my key — press ENTER to continue");
 
-  return { email, keyName };
+  // ── Step 3: Fluid Agent Key (fwag_) ────────────────────────────────────────
+  step(3, "Fluid Agent Key  (fwag_...)");
+  log(`  ${C.dim}This key lets your agent move crypto — send, swap, check balance.${C.reset}`);
+  log(`  ${C.dim}It is separate from the FLDP EC key. Shown once — save it now.${C.reset}`);
+  nl();
+
+  let agentKey = null;
+  try {
+    const res = await apiPost("/api/agent-keys", { email, label: "CLI Generated" });
+    if (res.key || res.agentKey) {
+      agentKey = res.key || res.agentKey;
+    } else {
+      warn(`Could not generate agent key: ${res.error || JSON.stringify(res)}`);
+    }
+  } catch (e) {
+    warn(`Could not reach API (${e.message}).`);
+  }
+
+  if (agentKey) {
+    log(hr());
+    nl();
+    warn(`${C.bold}${C.yellow}SHOWN ONCE — copy and save NOW. Cannot be retrieved again.${C.reset}`);
+    nl();
+    label("FLUID_AGENT_KEY", `${C.green}${agentKey}${C.reset}`);
+    nl();
+    log(hr());
+    nl();
+
+    // Append to .env.fadp
+    const envPath = path.join(process.cwd(), ".env.fadp");
+    const append  = `\n# Fluid Agent Key — powers crypto operations (send, swap, balance)\nFLUID_AGENT_KEY="${agentKey}"\n`;
+    fs.appendFileSync(envPath, append);
+    ok(`Appended ${C.cyan}FLUID_AGENT_KEY${C.reset} to ${C.cyan}.env.fadp${C.reset}`);
+    nl();
+    await pressEnter("I have saved my agent key — press ENTER to continue");
+  } else {
+    warn("Agent key not generated — get it later from Developer Dashboard → API Keys.");
+    nl();
+  }
+
+  return { email, keyName, agentKey };
 }
 
 // ─── Mode 1: install only ─────────────────────────────────────────────────────
@@ -524,10 +564,12 @@ async function runModeInstall() {
   log(`${C.bold}${C.green}  ✓  FADP installed!${C.reset}`);
   log(hr("═"));
   nl();
-  label("1. Protect keys",      `${C.dim}echo '.env.fadp' >> .gitignore${C.reset}`);
-  label("2. Load keys in .env", `${C.dim}cp .env.fadp .env${C.reset}`);
-  label("3. npm package",       `${C.cyan}https://www.npmjs.com/package/fluid-fadp${C.reset}`);
-  label("4. Docs",              `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
+  label("1. Protect keys",        `${C.dim}echo '.env.fadp' >> .gitignore${C.reset}`);
+  label("2. Load keys in .env",   `${C.dim}cp .env.fadp .env${C.reset}`);
+  label("3. FLDP_API_KEY_NAME",   `${C.cyan}in .env.fadp${C.reset}`);
+  label("4. FLUID_AGENT_KEY",     `${C.cyan}in .env.fadp${C.reset}`);
+  label("5. npm package",         `${C.cyan}https://www.npmjs.com/package/fluid-fadp${C.reset}`);
+  label("6. Docs",                `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
   nl();
 }
 
