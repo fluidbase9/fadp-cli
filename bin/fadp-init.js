@@ -375,41 +375,20 @@ async function selectMode() {
   }
 }
 
-// ─── Logo ─────────────────────────────────────────────────────────────────────
+// ─── Logo (ANSI block art — works in every terminal) ─────────────────────────
 
-const LOGO_URL = "https://fluidspot.s3.us-east-2.amazonaws.com/web/Base/media_files/fluid23.png";
+function printLogo() {
+  const T  = "\x1b[36m";          // teal
+  const G  = "\x1b[32m";          // green
+  const TL = "\x1b[38;5;43m";     // bright teal
+  const R  = "\x1b[0m";
+  const B  = "\x1b[1m";
 
-function fetchBuffer(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, res => {
-      const chunks = [];
-      res.on("data", c => chunks.push(c));
-      res.on("end",  () => resolve(Buffer.concat(chunks)));
-      res.on("error", reject);
-    }).on("error", reject);
-  });
-}
-
-async function printLogo() {
-  try {
-    const buf = await Promise.race([
-      fetchBuffer(LOGO_URL),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
-    ]);
-    const b64 = buf.toString("base64");
-
-    // Try iTerm2 / WezTerm / Hyper protocol
-    process.stdout.write(
-      `\x1b]1337;File=inline=1;width=8;height=4;preserveAspectRatio=1:${b64}\x07\n`
-    );
-
-    // Try Kitty terminal graphics protocol as well
-    process.stdout.write(
-      `\x1b_Ga=T,f=100,m=0,q=2:${b64}\x1b\\\n`
-    );
-  } catch {
-    // silently skip — emoji fallback in banner
-  }
+  log(`${TL}        ▗▄▄▄▄▄▄▄▖${R}`);
+  log(`${TL}       ▗▛▀▀▀▀▀▀▀▜▖${R}   ${B}${T}FLUID${R}${B} WALLET${R}`);
+  log(`${TL}       ▐▌  ${G}▗▄▄▖${TL}  ▐▌${R}   ${T}FADP Developer CLI${R}`);
+  log(`${TL}       ▐▌  ${G}▜▛▀▘${TL}  ▐▌${R}   ${"\x1b[2m"}fluidnative.com/fadp${R}`);
+  log(`${TL}       ▝▜▄▄▄▄▄▄▄▛▘${R}`);
 }
 
 // ─── Banner ───────────────────────────────────────────────────────────────────
@@ -417,9 +396,9 @@ async function printLogo() {
 async function banner() {
   nl();
   log(hr("═"));
-  await printLogo();
-  log(`${C.bold}${C.cyan}  🌊  Fluid Wallet — FADP Developer Setup${C.reset}`);
-  log(`${C.gray}  Fluid Agentic Developer Protocol · fluidnative.com/fadp${C.reset}`);
+  nl();
+  printLogo();
+  nl();
   log(hr("═"));
   nl();
 }
