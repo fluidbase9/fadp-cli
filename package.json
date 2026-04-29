@@ -1,6 +1,6 @@
 {
   "name": "@fluidwallet/fadp-cli",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "description": "FADP Developer Setup CLI — register your developer account, generate FLDP EC key pair, and install Fluid agent skills.",
   "bin": {
     "fadp": "./bin/fadp-init.js"

@@ -509,7 +509,30 @@ async function stepAccountAndKeys() {
     nl();
   }
 
-  return { email, keyName, agentKey };
+  return { email, keyName, agentKey, privateKeyJson };
+}
+
+// ─── Write keys to project .env ───────────────────────────────────────────────
+
+function writeProjectEnv(keyName, privateKeyJson, agentKey) {
+  const envPath = path.join(process.cwd(), ".env");
+  const marker  = "# FADP keys — added by @fluidwallet/fadp-cli";
+
+  let existing = "";
+  if (fs.existsSync(envPath)) existing = fs.readFileSync(envPath, "utf8");
+  if (existing.includes(marker)) return; // already written
+
+  const snippet = [
+    "",
+    marker,
+    `FLDP_API_KEY_NAME="${keyName}"`,
+    `FLDP_API_KEY_PRIVATE_KEY='${JSON.stringify(privateKeyJson)}'`,
+    agentKey ? `FLUID_AGENT_KEY="${agentKey}"` : "",
+    "",
+  ].filter(l => l !== undefined).join("\n");
+
+  fs.appendFileSync(envPath, snippet);
+  ok(`Keys appended to ${C.cyan}.env${C.reset}`);
 }
 
 // ─── Mode 1: install only ─────────────────────────────────────────────────────
@@ -517,10 +540,10 @@ async function stepAccountAndKeys() {
 async function runModeInstall() {
   log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Install FADP in existing project${C.reset}\n`);
 
-  const { keyName } = await stepAccountAndKeys();
+  const { keyName, agentKey, privateKeyJson } = await stepAccountAndKeys();
 
-  // Add fluid-fadp to project dependencies
-  step(3, "Install fluid-fadp");
+  // Step 4: Install fluid-fadp
+  step(4, "Install fluid-fadp");
   log(`  ${C.dim}Adding fluid-fadp to your project…${C.reset}`);
   nl();
   try {
@@ -531,6 +554,13 @@ async function runModeInstall() {
   }
   nl();
 
+  // Step 5: Write keys to .env
+  step(5, "Write keys to .env");
+  log(`  ${C.dim}Appending FADP keys to your project .env…${C.reset}`);
+  nl();
+  writeProjectEnv(keyName, privateKeyJson, agentKey);
+  nl();
+
   // Show usage snippet
   log(hr());
   nl();
@@ -539,11 +569,21 @@ async function runModeInstall() {
   log(`  ${C.gray}const { fadpGate } = require("fluid-fadp/server");${C.reset}`);
   nl();
   log(`  ${C.gray}app.get("/api/data", fadpGate({${C.reset}`);
-  log(`  ${C.gray}  keyName: "${keyName}",${C.reset}`);
-  log(`  ${C.gray}  amount:  "0.01",        // USDC per call${C.reset}`);
+  log(`  ${C.gray}  keyName: process.env.FLDP_API_KEY_NAME,${C.reset}`);
+  log(`  ${C.gray}  amount:  "0.01",   // USDC per call${C.reset}`);
   log(`  ${C.gray}}), (req, res) => {${C.reset}`);
   log(`  ${C.gray}  res.json({ data: "paid access!" });${C.reset}`);
   log(`  ${C.gray}});${C.reset}`);
+  nl();
+  log(`  ${C.bold}${C.white}Agent payment (in your agent code):${C.reset}`);
+  nl();
+  log(`  ${C.gray}// Auto-pay FADP gates using FLUID_AGENT_KEY${C.reset}`);
+  log(`  ${C.gray}const AGENT_KEY = process.env.FLUID_AGENT_KEY;${C.reset}`);
+  log(`  ${C.gray}fetch("https://fluidnative.com/v1/agents/send", {${C.reset}`);
+  log(`  ${C.gray}  method: "POST",${C.reset}`);
+  log(`  ${C.gray}  headers: { "X-Agent-Key": AGENT_KEY },${C.reset}`);
+  log(`  ${C.gray}  body: JSON.stringify({ to, amount, token: "USDC" })${C.reset}`);
+  log(`  ${C.gray});${C.reset}`);
   nl();
   log(hr());
   nl();
@@ -552,12 +592,12 @@ async function runModeInstall() {
   log(`${C.bold}${C.green}  ✓  FADP installed!${C.reset}`);
   log(hr("═"));
   nl();
-  label("1. Protect keys",        `${C.dim}echo '.env.fadp' >> .gitignore${C.reset}`);
-  label("2. Load keys in .env",   `${C.dim}cp .env.fadp .env${C.reset}`);
-  label("3. FLDP_API_KEY_NAME",   `${C.cyan}in .env.fadp${C.reset}`);
-  label("4. FLUID_AGENT_KEY",     `${C.cyan}in .env.fadp${C.reset}`);
-  label("5. npm package",         `${C.cyan}https://www.npmjs.com/package/fluid-fadp${C.reset}`);
-  label("6. Docs",                `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
+  label("Keys location",       `${C.cyan}.env${C.reset} and ${C.cyan}.env.fadp${C.reset}`);
+  label("Protect keys",        `${C.dim}echo '.env' >> .gitignore${C.reset}`);
+  label("FLDP_API_KEY_NAME",   `${C.dim}EC key — signs FADP requests${C.reset}`);
+  label("FLUID_AGENT_KEY",     `${C.dim}fwag_ key — sends USDC on Base${C.reset}`);
+  label("npm package",         `${C.cyan}https://www.npmjs.com/package/fluid-fadp${C.reset}`);
+  label("Docs",                `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
   nl();
 }
 
