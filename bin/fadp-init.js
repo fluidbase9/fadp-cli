@@ -152,7 +152,10 @@ async function multiSelect(items) {
     process.stdin.resume();
 
     nl();
-    log(`  ${C.dim}↑↓ navigate  SPACE select/deselect  A select all  ENTER confirm${C.reset}`);
+    log(`  ${C.bold}${C.cyan}  SPACE${C.reset}${C.bold}  =  select / deselect a skill${C.reset}`);
+    log(`  ${C.bold}${C.cyan}  ↑ ↓  ${C.reset}${C.bold}  =  move up / down${C.reset}`);
+    log(`  ${C.bold}${C.cyan}    A  ${C.reset}${C.bold}  =  select ALL${C.reset}`);
+    log(`  ${C.bold}${C.cyan}ENTER  ${C.reset}${C.bold}  =  confirm and continue${C.reset}`);
     nl();
 
     render();
@@ -630,11 +633,18 @@ async function runModeInstall() {
   log(`${C.bold}${C.green}  ✓  FADP ready in your project!${C.reset}`);
   log(hr("═"));
   nl();
-  label("Installed",          installed.length ? installed.map(i => `${C.cyan}${i}${C.reset}`).join(", ") : `${C.gray}(none)${C.reset}`);
-  label("Keys written to",    `${C.cyan}.env${C.reset} + ${C.cyan}.env.fadp${C.reset}`);
-  label("FLDP_API_KEY_NAME",  `${C.dim}EC key — signs FADP requests${C.reset}`);
-  label("FLUID_AGENT_KEY",    `${C.dim}fwag_ key — sends USDC on Base${C.reset}`);
-  label("Docs",               `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
+  log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
+  nl();
+  log(`  ${C.cyan}[1]${C.reset}  ${C.bold}code .${C.reset}                       ${C.dim}← open this project in VS Code${C.reset}`);
+  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}echo '.env.fadp' >> .gitignore${C.reset}${C.dim}  ← protect your keys${C.reset}`);
+  if (installed.includes("fadp-sample")) {
+    log(`  ${C.cyan}[3]${C.reset}  ${C.bold}cd fadp-sample && npm install${C.reset}${C.dim}   ← install sample dependencies${C.reset}`);
+    log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node fadp-sample/server.js${C.reset}   ${C.dim}← terminal 1: gated API server${C.reset}`);
+    log(`  ${C.cyan}[5]${C.reset}  ${C.bold}node fadp-sample/agent.js${C.reset}    ${C.dim}← terminal 2: paying agent${C.reset}`);
+  }
+  nl();
+  log(`  ${C.dim}Installed: ${installed.length ? installed.join(", ") : "none"}${C.reset}`);
+  log(`  ${C.dim}Keys in .env + .env.fadp  ·  Docs: fluidnative.com/fadp${C.reset}`);
   nl();
 }
 
@@ -673,13 +683,16 @@ async function runModeProject() {
   log(`${C.bold}${C.green}  ✓  FADP project ready!${C.reset}`);
   log(hr("═"));
   nl();
-  label("1. Protect keys",          `${C.dim}echo '.env.fadp' >> .gitignore${C.reset}`);
-  label("2. Install dependencies",  `${C.cyan}cd fadp-sample && npm install${C.reset}`);
-  label("3. Start gated server",    `${C.dim}node fadp-sample/server.js${C.reset}`);
-  label("4. Run paying agent",      `${C.dim}node fadp-sample/agent.js${C.reset}`);
-  label("5. Browse agent skills",   `${C.dim}ls ./agents/${C.reset}`);
-  label("6. Protocol package",      `${C.cyan}https://www.npmjs.com/package/fluid-fadp${C.reset}`);
-  label("7. Docs",                  `${C.cyan}https://fluidnative.com/fadp${C.reset}`);
+  log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
+  nl();
+  log(`  ${C.cyan}[1]${C.reset}  ${C.bold}cd fadp-sample${C.reset}              ${C.dim}← enter your project${C.reset}`);
+  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}code .${C.reset}                       ${C.dim}← open in VS Code${C.reset}`);
+  log(`  ${C.cyan}[3]${C.reset}  ${C.bold}npm install${C.reset}                  ${C.dim}← install dependencies${C.reset}`);
+  log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node server.js${C.reset}               ${C.dim}← terminal 1: start gated API${C.reset}`);
+  log(`  ${C.cyan}[5]${C.reset}  ${C.bold}node agent.js${C.reset}                ${C.dim}← terminal 2: run paying agent${C.reset}`);
+  nl();
+  log(`  ${C.dim}Keys saved in .env.fadp — run: echo '.env.fadp' >> .gitignore${C.reset}`);
+  log(`  ${C.dim}Agent skills in ./agents/  —  Docs: fluidnative.com/fadp${C.reset}`);
   nl();
 }
 
