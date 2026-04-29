@@ -471,17 +471,30 @@ async function stepAccountAndKeys() {
 
   // ── Step 3: Fluid Agent Key (fwag_) ────────────────────────────────────────
   step(3, "Fluid Agent Key  (fwag_...)");
-  log(`  ${C.dim}This key lets your agent move crypto — send, swap, check balance.${C.reset}`);
-  log(`  ${C.dim}It is separate from the FLDP EC key. Shown once — save it now.${C.reset}`);
+  log(`  ${C.dim}Generated on your device — only a hash is sent to Fluid servers.${C.reset}`);
+  log(`  ${C.dim}This key lets your agent send, swap, and check balance on Base.${C.reset}`);
   nl();
+
+  // Generate key locally (non-custodial) — raw key never leaves this device
+  const rawKeyBytes  = crypto.randomBytes(32);
+  const rawAgentKey  = `fwag_${rawKeyBytes.toString("hex")}`;          // fwag_ + 64 hex chars
+  const agentKeyHash = crypto.createHash("sha256").update(rawAgentKey).digest("hex"); // 64-char hex
+  const agentKeyPfx  = rawAgentKey.slice(0, 16);                       // first 16 chars
+  const agentKeyName = `fluid/agentkeys/${email.replace(/[@.]/g, "_")}/agent-0`;
 
   let agentKey = null;
   try {
-    const res = await apiPost("/api/agent-keys", { email, label: "CLI Generated" });
-    if (res.key || res.agentKey) {
-      agentKey = res.key || res.agentKey;
+    const res = await apiPost("/api/agent-keys", {
+      email,
+      name:   agentKeyName,
+      keyHash: agentKeyHash,
+      keyPrefix: agentKeyPfx,
+      scopes: ["read", "pay", "swap", "agentpay"],
+    });
+    if (res.keyPrefix || res.message) {
+      agentKey = rawAgentKey;  // raw key shown to user — never stored server-side
     } else {
-      warn(`Could not generate agent key: ${res.error || JSON.stringify(res)}`);
+      warn(`Could not register agent key: ${res.error || JSON.stringify(res)}`);
     }
   } catch (e) {
     warn(`Could not reach API (${e.message}).`);
