@@ -750,6 +750,8 @@ async function stepAccountAndKeys() {
     fs.appendFileSync(envPath, append);
     ok(`Appended ${C.cyan}FLUID_AGENT_KEY${C.reset} to ${C.cyan}.env.fadp${C.reset}`);
     nl();
+    writeKeyToShellProfile(agentKey);
+    nl();
     await pressEnter("I have saved my agent key — press ENTER to continue");
   } else {
     warn("Agent key not generated — get it later from Developer Dashboard → API Keys.");
@@ -757,6 +759,39 @@ async function stepAccountAndKeys() {
   }
 
   return { email, keyName, agentKey, privateKeyJson };
+}
+
+// ─── Write FLUID_AGENT_KEY to shell profile ───────────────────────────────────
+
+function writeKeyToShellProfile(agentKey) {
+  const home = os.homedir();
+  // Pick the active shell profile — prefer zshrc, fall back to bashrc, then profile
+  const candidates = [
+    path.join(home, ".zshrc"),
+    path.join(home, ".bashrc"),
+    path.join(home, ".bash_profile"),
+    path.join(home, ".profile"),
+  ];
+  const profilePath = candidates.find(p => fs.existsSync(p)) || path.join(home, ".zshrc");
+
+  const marker  = "# FLUID_AGENT_KEY — added by @fluidwallet/fadp-cli";
+  const existing = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, "utf8") : "";
+
+  if (existing.includes("FLUID_AGENT_KEY")) {
+    // Already set — update the value in place
+    const updated = existing.replace(
+      /export FLUID_AGENT_KEY=.*/,
+      `export FLUID_AGENT_KEY="${agentKey}"`
+    );
+    fs.writeFileSync(profilePath, updated);
+    ok(`Updated ${C.cyan}FLUID_AGENT_KEY${C.reset} in ${C.cyan}${profilePath}${C.reset}`);
+  } else {
+    const snippet = `\n${marker}\nexport FLUID_AGENT_KEY="${agentKey}"\n`;
+    fs.appendFileSync(profilePath, snippet);
+    ok(`Exported ${C.cyan}FLUID_AGENT_KEY${C.reset} to ${C.cyan}${profilePath}${C.reset}`);
+  }
+  log(`  ${C.dim}All agents (Codex, Cursor, Cline…) will pick this up in new terminal sessions.${C.reset}`);
+  log(`  ${C.dim}To apply now without reopening terminal, run: source ${profilePath}${C.reset}`);
 }
 
 // ─── Write keys to project .env ───────────────────────────────────────────────
