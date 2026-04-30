@@ -122,13 +122,24 @@ function pressEnter(msg = "Press ENTER to continue") {
 
 // ─── Multi-select checkbox ────────────────────────────────────────────────────
 
+const WIN_H = 14;
+
 async function multiSelect(items) {
   const selected = new Set();
   let cursor     = 0;
+  let winStart   = 0;
+
+  function clampWindow() {
+    const vis = Math.min(WIN_H, items.length);
+    if (cursor < winStart) winStart = cursor;
+    if (cursor >= winStart + vis) winStart = cursor - vis + 1;
+  }
 
   function render() {
-    process.stdout.write("\x1b[?25l"); // hide cursor
-    for (let i = 0; i < items.length; i++) {
+    process.stdout.write("[?25l");
+    const vis    = Math.min(WIN_H, items.length);
+    const winEnd = winStart + vis;
+    for (let i = winStart; i < winEnd; i++) {
       const isSel = selected.has(i);
       const isCur = cursor === i;
       const box   = isSel ? `${C.green}[✓]${C.reset}` : `${C.gray}[ ]${C.reset}`;
@@ -136,16 +147,21 @@ async function multiSelect(items) {
       const name  = isCur
         ? `${C.bold}${C.white}${items[i].name.padEnd(22)}${C.reset}`
         : `${C.white}${items[i].name.padEnd(22)}${C.reset}`;
-      const hint = items[i].desc || (items[i].group === "universal" ? `${C.cyan}universal${C.reset}` : items[i].dir ? `${C.gray}${items[i].dir}${C.reset}` : "");
+      const hint  = items[i].desc || (items[i].group === "universal" ? `${C.cyan}universal${C.reset}` : items[i].dir ? `${C.gray}${items[i].dir}${C.reset}` : "");
       log(`  ${arrow} ${box} ${name}  ${C.gray}${hint}${C.reset}`);
     }
-    // move cursor back up
-    process.stdout.write(`\x1b[${items.length}A`);
+    const scrollLine = items.length > vis
+      ? `  ${C.gray}${winStart + 1}–${winStart + vis} of ${items.length}  (↑↓ to scroll)${C.reset}`
+      : ``;
+    log(scrollLine);
+    process.stdout.write(`[${vis + 1}A`);
   }
 
   function clearRender() {
-    for (let i = 0; i < items.length; i++) process.stdout.write("\x1b[2K\n");
-    process.stdout.write(`\x1b[${items.length}A`);
+    const lines2 = Math.min(WIN_H, items.length) + 1;
+    for (let i = 0; i < lines2; i++) process.stdout.write("[2K
+");
+    process.stdout.write(`[${lines2}A`);
   }
 
   return new Promise(resolve => {
@@ -165,8 +181,10 @@ async function multiSelect(items) {
       const key = buf.toString();
       if (key === "\x1b[A" || key === "k") { // up
         cursor = (cursor - 1 + items.length) % items.length;
+        clampWindow();
       } else if (key === "\x1b[B" || key === "j") { // down
         cursor = (cursor + 1) % items.length;
+        clampWindow();
       } else if (key === " ") { // toggle
         if (selected.has(cursor)) selected.delete(cursor);
         else selected.add(cursor);
