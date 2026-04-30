@@ -925,6 +925,17 @@ async function runModeProject() {
   scaffoldSampleProject(keyName, privateKeyJson, agentKey);
   nl();
 
+  // Auto-open VS Code if the CLI is available
+  let vsCodeOpened = false;
+  if (fs.existsSync(SAMPLE_DIR)) {
+    try {
+      const { spawn } = require("child_process");
+      spawn("code", [SAMPLE_DIR], { detached: true, stdio: "ignore" }).unref();
+      vsCodeOpened = true;
+      ok(`Opened ${C.cyan}fadp-sample/${C.reset} in VS Code`);
+    } catch { /* VS Code CLI not in PATH — user opens manually */ }
+  }
+
   log(hr("═"));
   log(`${C.bold}${C.green}  ✓  FADP project ready!${C.reset}`);
   log(hr("═"));
@@ -932,7 +943,11 @@ async function runModeProject() {
   log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
   nl();
   log(`  ${C.cyan}[1]${C.reset}  ${C.bold}cd fadp-sample${C.reset}              ${C.dim}← enter your project${C.reset}`);
-  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}code .${C.reset}                       ${C.dim}← open in VS Code${C.reset}`);
+  if (!vsCodeOpened) {
+  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}code fadp-sample${C.reset}             ${C.dim}← open in VS Code${C.reset}`);
+  } else {
+  log(`  ${C.cyan}[2]${C.reset}  ${C.green}VS Code opened automatically ✓${C.reset}`);
+  }
   log(`  ${C.cyan}[3]${C.reset}  ${C.bold}npm install${C.reset}                  ${C.dim}← install dependencies${C.reset}`);
   log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node server.js${C.reset}               ${C.dim}← terminal 1: start gated API${C.reset}`);
   log(`  ${C.cyan}[5]${C.reset}  ${C.bold}node agent.js${C.reset}                ${C.dim}← terminal 2: run paying agent${C.reset}`);
