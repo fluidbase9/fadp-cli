@@ -49,6 +49,33 @@ const API_BASE = process.env.FADP_API_URL || "https://fluidnative.com";
 
 // ─── HTTP helper (no axios/node-fetch needed) ─────────────────────────────────
 
+function apiGet(urlPath, agentKey) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlPath, API_BASE);
+    const mod = url.protocol === "https:" ? https : http;
+    const opts = {
+      hostname: url.hostname,
+      port:     url.port || (url.protocol === "https:" ? 443 : 80),
+      path:     url.pathname + url.search,
+      method:   "GET",
+      headers:  {
+        "User-Agent":   "@fluidwallet/fadp-cli",
+        ...(agentKey ? { "X-Agent-Key": agentKey } : {}),
+      },
+    };
+    const req = mod.request(opts, res => {
+      let data = "";
+      res.on("data", c => (data += c));
+      res.on("end",  () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve(null); }
+      });
+    });
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
+
 function apiPost(urlPath, body) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
@@ -70,7 +97,7 @@ function apiPost(urlPath, body) {
       res.on("data", c => (data += c));
       res.on("end",  () => {
         try { resolve(JSON.parse(data)); }
-        catch { resolve({ success: false, error: data }); }
+        catch { resolve({ success: false, error: data.trim().startsWith("<") ? `Server error (${res.statusCode})` : data }); }
       });
     });
     req.on("error", reject);
@@ -159,8 +186,7 @@ async function multiSelect(items) {
 
   function clearRender() {
     const lines2 = Math.min(WIN_H, items.length) + 1;
-    for (let i = 0; i < lines2; i++) process.stdout.write("[2K
-");
+    for (let i = 0; i < lines2; i++) process.stdout.write("\x1b[2K\n");
     process.stdout.write(`[${lines2}A`);
   }
 
@@ -647,105 +673,170 @@ async function banner() {
 
 // ─── Shared: account + key steps ─────────────────────────────────────────────
 
+const DEV_STORE = path.join(os.homedir(), ".fluid-developer.json");
+
+function loadDevStore() {
+  try { return JSON.parse(fs.readFileSync(DEV_STORE, "utf8")); } catch { return {}; }
+}
+function saveDevStore(data) {
+  try { fs.writeFileSync(DEV_STORE, JSON.stringify(data, null, 2), "utf8"); } catch {}
+}
+
 async function stepAccountAndKeys() {
   step(1, "Developer Account");
   log(`  ${C.dim}Create a new Fluid developer account, or sign in if you already have one.${C.reset}`);
   nl();
 
-  const email    = await prompt("Email");
-  const password = await promptPassword("Password");
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  let email = "";
+  while (true) {
+    email = (await prompt("Email")).trim();
+    if (emailRe.test(email)) break;
+    warn("Enter a valid email address (e.g. you@example.com)");
+  }
+
+  let password = "";
+  while (true) {
+    password = await promptPassword("Password");
+    if (password.length >= 6) break;
+    warn("Password must be at least 6 characters");
+  }
   nl();
 
-  log(`  ${C.dim}Registering…${C.reset}`);
+  // Local store tracks whether this email has had keys generated on this machine
+  const store    = loadDevStore();
+  const seenBefore = !!store[email.toLowerCase()];
+
+  log(`  ${C.dim}Signing in…${C.reset}`);
+  let isNewAccount = false;
   try {
     const res = await apiPost("/api/auth/register-developer", { email, password });
     if (res.success || res.uid) {
       ok("Developer account created");
-    } else if (res.error && res.error.toLowerCase().includes("exist")) {
+      isNewAccount = true;
+    } else if (res.error && (res.error.toLowerCase().includes("exist") || res.error.toLowerCase().includes("duplicate"))) {
       warn("Account already exists — signing in");
-      const loginRes = await apiPost("/api/auth/login-developer", { email, password });
-      if (loginRes.success || loginRes.uid) ok("Signed in to existing account");
-      else fail(`Login failed: ${loginRes.error || "unknown error"}`);
+      let loginOk = false;
+      while (!loginOk) {
+        const loginRes = await apiPost("/api/auth/login-developer", { email, password });
+        if (loginRes.success || loginRes.uid) { ok("Signed in to existing account"); loginOk = true; }
+        else {
+          fail(`Wrong password for ${email}`);
+          password = "";
+          while (password.length < 6) {
+            password = await promptPassword("Password");
+            if (password.length < 6) warn("Password must be at least 6 characters");
+          }
+        }
+      }
     } else {
-      warn(`API response: ${res.error || JSON.stringify(res)}`);
+      // Server unavailable — use local store, ask if store has no record
+      if (seenBefore) {
+        ok(`Welcome back ${email}`);
+      } else {
+        const firstTime = await ask("First time using this email with Fluid?");
+        isNewAccount = firstTime;
+        if (!firstTime) ok(`Signed in as ${email}`);
+        else ok(`New account: ${email}`);
+      }
     }
   } catch (e) {
-    warn(`Could not reach API (${e.message}). Continuing offline.`);
+    if (seenBefore) {
+      ok(`Welcome back ${email}`);
+    } else {
+      const firstTime = await ask("First time using this email with Fluid?");
+      isNewAccount = firstTime;
+      if (!firstTime) ok(`Signed in as ${email}`);
+      else ok(`New account: ${email}`);
+    }
   }
 
-  step(2, "FLDP EC Key Pair");
-  log(`  ${C.dim}Generating P-256 ECDSA key pair in this terminal…${C.reset}`);
-  nl();
+  let keyName = null;
+  let privateKeyJson = null;
 
-  const { keyName, publicKeyPem, privateKeyJson } = await generateFLDPKeyPair(email);
+  if (isNewAccount) {
+    step(2, "FLDP EC Key Pair");
+    log(`  ${C.dim}Generating P-256 ECDSA key pair in this terminal…${C.reset}`);
+    nl();
 
-  apiPost("/api/developer/fldp-keys/register", {
-    email, keyName, publicKeyPem, label: "CLI Generated",
-  }).catch(() => {});
+    const { keyName: kn, publicKeyPem, privateKeyJson: pkj } = await generateFLDPKeyPair(email);
+    keyName = kn;
+    privateKeyJson = pkj;
 
-  log(hr());
-  nl();
-  warn(`${C.bold}${C.yellow}SHOWN ONCE — copy and save NOW. This will not be displayed again.${C.reset}`);
-  nl();
-  label("FLDP_API_KEY_NAME",        `${C.cyan}${keyName}${C.reset}`);
-  nl();
-  label("FLDP_API_KEY_PRIVATE_KEY", `${C.yellow}(shown below)${C.reset}`);
-  nl();
-  for (const line of JSON.stringify(privateKeyJson, null, 2).split("\n"))
-    log(`  ${C.gray}${line}${C.reset}`);
-  nl();
-  log(hr());
-  nl();
+    apiPost("/api/developer/fldp-keys/register", {
+      email, keyName, publicKeyPem, label: "CLI Generated",
+    }).catch(() => {});
 
-  await pressEnter("I have saved my key — press ENTER to continue");
+    log(hr());
+    nl();
+    warn(`${C.bold}${C.yellow}SHOWN ONCE — copy and save NOW. This will not be displayed again.${C.reset}`);
+    nl();
+    label("FLDP_API_KEY_NAME",        `${C.cyan}${keyName}${C.reset}`);
+    nl();
+    label("FLDP_API_KEY_PRIVATE_KEY", `${C.yellow}(shown below)${C.reset}`);
+    nl();
+    for (const line of JSON.stringify(privateKeyJson, null, 2).split("\n"))
+      log(`  ${C.gray}${line}${C.reset}`);
+    nl();
+    log(hr());
+    nl();
+
+    // Mark this email as seen so future runs skip EC key generation
+    const s = loadDevStore(); s[email.toLowerCase()] = { registeredAt: new Date().toISOString() }; saveDevStore(s);
+
+    await pressEnter("I have saved my key — press ENTER to continue");
+  } else {
+    step(2, "FLDP EC Key Pair");
+    ok("Existing account — EC key already generated. Check your saved credentials.");
+    nl();
+  }
 
   // ── Step 3: Fluid Agent Key (fwag_) ────────────────────────────────────────
   step(3, "Fluid Agent Key  (fwag_...)");
-  log(`  ${C.dim}Generated on your device — only a hash is sent to Fluid servers.${C.reset}`);
-  log(`  ${C.dim}This key lets your agent send, swap, and check balance on Base.${C.reset}`);
-  nl();
-
-  // Generate key locally (non-custodial) — raw key never leaves this device
-  const rawKeyBytes  = crypto.randomBytes(32);
-  const rawAgentKey  = `fwag_${rawKeyBytes.toString("hex")}`;          // fwag_ + 64 hex chars
-  const agentKeyHash = crypto.createHash("sha256").update(rawAgentKey).digest("hex"); // 64-char hex
-  const agentKeyPfx  = rawAgentKey.slice(0, 16);                       // first 16 chars
-  const agentKeyName = `fluid/agentkeys/${email.replace(/[@.]/g, "_")}/agent-0`;
 
   let agentKey = null;
-  try {
-    const res = await apiPost("/api/agent-keys", {
-      email,
-      name:   agentKeyName,
-      keyHash: agentKeyHash,
-      keyPrefix: agentKeyPfx,
-      scopes: ["read", "pay", "swap", "agentpay"],
-    });
-    if (res.keyPrefix || res.message) {
-      agentKey = rawAgentKey;  // raw key shown to user — never stored server-side
-    } else {
-      warn(`Could not register agent key: ${res.error || JSON.stringify(res)}`);
-    }
-  } catch (e) {
-    warn(`Could not reach API (${e.message}).`);
-  }
 
-  if (agentKey) {
-    log(hr());
+  if (!isNewAccount) {
+    ok("Existing account — agent key already in ~/.zshrc. Open a new terminal to use it.");
     nl();
-    warn(`${C.bold}${C.yellow}SHOWN ONCE — copy and save NOW. Cannot be retrieved again.${C.reset}`);
-    nl();
-    label("FLUID_AGENT_KEY", `${C.green}${agentKey}${C.reset}`);
-    nl();
-    log(hr());
-    nl();
-
-    writeKeyToShellProfile(agentKey);
-    nl();
-    await pressEnter("I have saved my agent key — press ENTER to continue");
   } else {
-    warn("Agent key not generated — get it later from Developer Dashboard → API Keys.");
+    log(`  ${C.dim}Generated on your device — only a hash is sent to Fluid servers.${C.reset}`);
+    log(`  ${C.dim}This key lets your agent send, swap, and check balance on Base.${C.reset}`);
     nl();
+
+    const rawKeyBytes  = crypto.randomBytes(32);
+    const rawAgentKey  = `fwag_${rawKeyBytes.toString("hex")}`;
+    const agentKeyHash = crypto.createHash("sha256").update(rawAgentKey).digest("hex");
+    const agentKeyPfx  = rawAgentKey.slice(0, 16);
+    const agentKeyName = `fluid/agentkeys/${email.replace(/[@.]/g, "_")}/agent-0`;
+
+    try {
+      const res = await apiPost("/api/agent-keys", {
+        email, name: agentKeyName, keyHash: agentKeyHash, keyPrefix: agentKeyPfx,
+        scopes: ["read", "pay", "swap", "agentpay"],
+      });
+      if (res.keyPrefix || res.message) agentKey = rawAgentKey;
+      else warn(`Could not register agent key: ${res.error || JSON.stringify(res)}`);
+    } catch (e) {
+      agentKey = rawAgentKey; // offline — still show the key so user can save it
+    }
+
+    if (agentKey) {
+      log(hr());
+      nl();
+      warn(`${C.bold}${C.yellow}SHOWN ONCE — copy and save NOW. Cannot be retrieved again.${C.reset}`);
+      nl();
+      label("FLUID_AGENT_KEY", `${C.green}${agentKey}${C.reset}`);
+      nl();
+      log(hr());
+      nl();
+      writeKeyToShellProfile(agentKey);
+      nl();
+      await pressEnter("I have saved my agent key — press ENTER to continue");
+    } else {
+      warn("Agent key not generated — get it later from Developer Dashboard → API Keys.");
+      nl();
+    }
   }
 
   return { email, keyName, agentKey, privateKeyJson };
@@ -960,35 +1051,93 @@ async function runModeProject() {
   scaffoldSampleProject(keyName, privateKeyJson, agentKey);
   nl();
 
-  // Auto-open VS Code if the CLI is available
-  let vsCodeOpened = false;
-  if (fs.existsSync(SAMPLE_DIR)) {
-    try {
-      const { spawn } = require("child_process");
-      spawn("code", [SAMPLE_DIR], { detached: true, stdio: "ignore" }).unref();
-      vsCodeOpened = true;
-      ok(`Opened ${C.cyan}fadp-sample/${C.reset} in VS Code`);
-    } catch { /* VS Code CLI not in PATH — user opens manually */ }
-  }
-
   log(hr("═"));
   log(`${C.bold}${C.green}  ✓  FADP project ready!${C.reset}`);
   log(hr("═"));
   nl();
+
+  // ── Agent wallet balance + funding check (shown BEFORE VS Code opens) ────────
+  const MIN_USDC    = 0.01;
+  const keyForBal   = agentKey || process.env.FLUID_AGENT_KEY;
+  let   walletAddr  = null;
+  let   usdcBalance = 0;
+
+  log(`  ${C.bold}${C.cyan}Agent Wallet  ·  Base mainnet${C.reset}`);
+  log(`  ${C.dim}${"─".repeat(44)}${C.reset}`);
+
+  if (keyForBal) {
+    try {
+      const balRes = await apiGet("/v1/agents/balance?chain=base", keyForBal);
+      if (balRes && balRes.walletAddress) {
+        walletAddr = balRes.walletAddress;
+        log(`  ${C.dim}Address:  ${C.reset}${C.cyan}${walletAddr}${C.reset}`);
+        log(`  ${C.dim}BaseScan: https://basescan.org/address/${walletAddr}${C.reset}`);
+        nl();
+        if (balRes.balances && balRes.balances.length > 0) {
+          for (const b of balRes.balances) {
+            const hi = b.token?.toUpperCase() === "USDC" ? C.green : C.gray;
+            log(`  ${C.bold}${hi}${b.token}: ${b.amount}${C.reset}  ${C.dim}on ${b.chain}${C.reset}`);
+            if (b.token?.toUpperCase() === "USDC") usdcBalance = parseFloat(b.amount) || 0;
+          }
+        } else {
+          log(`  ${C.yellow}Balance: 0.00 USDC${C.reset}  ${C.dim}(wallet is empty)${C.reset}`);
+        }
+      } else {
+        log(`  ${C.gray}Could not fetch balance — check your connection${C.reset}`);
+      }
+    } catch {
+      log(`  ${C.gray}Could not fetch balance — check your connection${C.reset}`);
+    }
+  } else {
+    log(`  ${C.gray}No agent key found — run CLI again to generate one${C.reset}`);
+  }
+
+  nl();
+
+  if (usdcBalance < MIN_USDC) {
+    log(hr("─"));
+    log(`  ${C.bold}${C.yellow}  Fund your wallet to start making payments${C.reset}`);
+    log(hr("─"));
+    nl();
+    log(`  Minimum required:  ${C.bold}${C.green}${MIN_USDC} USDC${C.reset}  ${C.dim}(covers ~10 API calls at 0.001 USDC each)${C.reset}`);
+    nl();
+    if (walletAddr) {
+      log(`  ${C.bold}Send USDC to:${C.reset}`);
+      log(`  ${C.cyan}${C.bold}  ${walletAddr}${C.reset}`);
+      nl();
+    }
+    log(`  ${C.dim}Network:  Base mainnet (Chain ID 8453)${C.reset}`);
+    log(`  ${C.dim}Token:    USDC  (native on Base — not bridged)${C.reset}`);
+    log(`  ${C.dim}How:      Coinbase, Binance, or bridge from Ethereum${C.reset}`);
+    nl();
+    log(hr("─"));
+    nl();
+  }
+
+  // ── Next steps ────────────────────────────────────────────────────────────────
   log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
   nl();
   log(`  ${C.cyan}[1]${C.reset}  ${C.bold}cd fadp-sample${C.reset}              ${C.dim}← enter your project${C.reset}`);
-  if (!vsCodeOpened) {
-  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}code fadp-sample${C.reset}             ${C.dim}← open in VS Code${C.reset}`);
-  } else {
-  log(`  ${C.cyan}[2]${C.reset}  ${C.green}VS Code opened automatically ✓${C.reset}`);
-  }
-  log(`  ${C.cyan}[3]${C.reset}  ${C.bold}npm install${C.reset}                  ${C.dim}← install dependencies${C.reset}`);
-  log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node server.js${C.reset}               ${C.dim}← terminal 1: start gated API${C.reset}`);
-  log(`  ${C.cyan}[5]${C.reset}  ${C.bold}node agent.js${C.reset}                ${C.dim}← terminal 2: run paying agent${C.reset}`);
+  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}npm install${C.reset}                  ${C.dim}← install dependencies${C.reset}`);
+  log(`  ${C.cyan}[3]${C.reset}  ${C.bold}node server.js${C.reset}               ${C.dim}← terminal 1: start gated API${C.reset}`);
+  log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node agent.js${C.reset}                ${C.dim}← terminal 2: run paying agent${C.reset}`);
   nl();
   log(`  ${C.dim}FLUID_AGENT_KEY exported to ~/.zshrc — all agents pick it up automatically${C.reset}`);
-  log(`  ${C.dim}Skills installed into your agent's directory  —  Docs: fluidnative.com/fadp${C.reset}`);
+  log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
+  nl();
+
+  await pressEnter("Press ENTER to open fadp-sample/ in VS Code");
+
+  // Auto-open VS Code
+  if (fs.existsSync(SAMPLE_DIR)) {
+    try {
+      const { spawn } = require("child_process");
+      spawn("code", [SAMPLE_DIR], { detached: true, stdio: "ignore" }).unref();
+      ok(`Opened ${C.cyan}fadp-sample/${C.reset} in VS Code`);
+    } catch {
+      ok(`Run:  ${C.bold}code fadp-sample${C.reset}  to open in VS Code`);
+    }
+  }
   nl();
 }
 

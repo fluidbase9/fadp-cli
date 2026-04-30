@@ -184,6 +184,11 @@ async function checkBalanceBeforePayment(amount, token = "USDC", chain = "base")
     return true;
   }
 
+  if (!walletAddress) {
+    warn("Balance endpoint unavailable — proceeding without balance check");
+    return true;
+  }
+
   if (usdc < needed) {
     err(`Insufficient USDC balance`);
     log(`    Have:   ${C.yellow}${usdc.toFixed(6)} USDC${C.reset}`);
@@ -194,12 +199,8 @@ async function checkBalanceBeforePayment(amount, token = "USDC", chain = "base")
     log(`    1. Network: Base mainnet (Chain ID 8453)`);
     log(`    2. Token:   USDC (native on Base)`);
     log(`       Contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`);
-    if (walletAddress) {
-      log(`    3. Send ${needed.toFixed(6)} USDC or more to:`);
-      log(`       ${C.bold}${walletAddress}${C.reset}`);
-    } else {
-      log(`    3. Log in to fluidnative.com → Settings to find your wallet address`);
-    }
+    log(`    3. Send ${needed.toFixed(6)} USDC or more to:`);
+    log(`       ${C.bold}${walletAddress}${C.reset}`);
     log(`    4. Then run this agent again.\n`);
     return false;
   }
@@ -377,24 +378,36 @@ async function main() {
   //   await agentPay(DEMO_RECIPIENT_EMAIL, "1.00", "USDC", "Demo payment");
   // }
 
-  // ── Step 3: Fetch live ETH price ──────────────────────────────────────────
-  log(`${C.bold}  Step 2: Fetch live ETH price (Fluid crypto API)${C.reset}`);
+  // ── Step 3: Fetch live ETH price via FADP-gated local server ────────────
+  log(`${C.bold}  Step 2: Fetch live ETH price (FADP-gated)${C.reset}`);
   div();
-  const priceRes = await fluidApi("/v1/agents/price?token=ethereum&currency=usd");
+  info(`GET ${SERVER_URL}/api/price/ethereum  [FADP/1.0 — auto-pays 402]`);
+
+  const priceRes = await fadpFetch(`${SERVER_URL}/api/price/ethereum`, {
+    headers: { "X-Agent-Key": FLUID_AGENT_KEY },
+  });
   if (priceRes?.status === 200) {
-    const { price, source } = priceRes.body;
-    ok(`ETH: $${price} USD${source ? `  (source: ${source})` : ""}`);
+    const body = priceRes.body || {};
+    const price = body.price ?? body.usd ?? body.data?.price;
+    const source = body.source ?? "";
+    ok(`ETH: $${price != null ? price : "unavailable"} USD${source ? `  (source: ${source})` : ""}`);
   } else {
-    warn(`Price fetch failed: ${JSON.stringify(priceRes?.body)}`);
+    warn(`Price fetch failed (${priceRes?.status}): ${JSON.stringify(priceRes?.body)}`);
   }
 
   // ── Step 4: Fetch USDC and SOL prices ────────────────────────────────────
-  const tokens = ["usd-coin", "solana"];
+  const tokens = [
+    { id: "usd-coin", label: "USDC" },
+    { id: "solana",   label: "SOL"  },
+  ];
   for (const t of tokens) {
-    const r = await fluidApi(`/v1/agents/price?token=${t}&currency=usd`);
+    const r = await fadpFetch(`${SERVER_URL}/api/price/${t.id}`, {
+      headers: { "X-Agent-Key": FLUID_AGENT_KEY },
+    });
     if (r?.status === 200) {
-      const { price } = r.body;
-      ok(`${t}: $${price} USD`);
+      const body = r.body || {};
+      const price = body.price ?? body.usd ?? body.data?.price;
+      ok(`${t.label}: $${price != null ? price : "unavailable"} USD`);
     }
   }
 

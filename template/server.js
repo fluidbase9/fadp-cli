@@ -142,7 +142,40 @@ async function fadpGate(req, res, next) {
   }
 }
 
-// ── Gated endpoint ─────────────────────────────────────────────────────────────
+// ── Price cache + fetcher ──────────────────────────────────────────────────────
+const PRICE_CACHE = {};
+const PRICE_TTL   = 60_000;
+
+function mockPrice(coinId) {
+  const table = { bitcoin: 67432, ethereum: 3241, solana: 142, "usd-coin": 1.0, cardano: 0.45, "matic-network": 0.72 };
+  return table[coinId.toLowerCase()] ?? 1.0;
+}
+
+function fetchLivePrice(coinId) {
+  return new Promise(resolve => {
+    const cached = PRICE_CACHE[coinId];
+    if (cached && Date.now() - cached.ts < PRICE_TTL) return resolve(cached.price);
+    const path = `/api/v3/simple/price?ids=${encodeURIComponent(coinId)}&vs_currencies=usd`;
+    const req  = https.get(
+      { hostname: "api.coingecko.com", path, headers: { "User-Agent": "fadp-sample/1.0" } },
+      res => {
+        let d = "";
+        res.on("data", c => (d += c));
+        res.on("end", () => {
+          try {
+            const price = JSON.parse(d)[coinId]?.usd;
+            if (price) { PRICE_CACHE[coinId] = { price, ts: Date.now() }; return resolve(price); }
+          } catch {}
+          resolve(mockPrice(coinId));
+        });
+      }
+    );
+    req.on("error", () => resolve(mockPrice(coinId)));
+    req.setTimeout(3000, () => { req.destroy(); resolve(mockPrice(coinId)); });
+  });
+}
+
+// ── Gated endpoints ─────────────────────────────────────────────────────────────
 app.get("/api/data", fadpGate, (req, res) => {
   res.json({
     message:   "Payment verified — access granted!",
@@ -158,6 +191,13 @@ app.get("/api/data", fadpGate, (req, res) => {
   });
 });
 
+// Live token price — 0.001 USDC per call (demonstrates micro-payment use case)
+app.get("/api/price/:coinId", fadpGate, async (req, res) => {
+  const coinId = req.params.coinId.toLowerCase();
+  const price  = await fetchLivePrice(coinId);
+  res.json({ coinId, price, currency: "usd", source: "coingecko", protocol: "FADP/1.0" });
+});
+
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({
@@ -165,19 +205,30 @@ app.get("/health", (req, res) => {
     fadp:    "1.0",
     price:   `${PRICE_USDC} USDC`,
     payTo:   PAY_TO || "(FADP_WALLET_ADDRESS not set — payments skipped in dev mode)",
+    endpoints: ["GET /api/data", "GET /api/price/:coinId", "GET /health"],
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`\n  🌊 FADP Sample Server — FADP/1.0`);
+const server = app.listen(PORT, () => {
+  console.log(`\n  FADP Sample Server — FADP/1.0`);
   console.log(`  Listening:        http://localhost:${PORT}`);
-  console.log(`  Gated endpoint:   GET /api/data   (costs ${PRICE_USDC} USDC)`);
+  console.log(`  Gated endpoints:  GET /api/data         (costs ${PRICE_USDC} USDC)`);
+  console.log(`                    GET /api/price/:coinId (costs ${PRICE_USDC} USDC)`);
   console.log(`  Health check:     GET /health`);
   if (!PAY_TO) {
-    console.log(`\n  ⚠️  FADP_WALLET_ADDRESS not set in .env`);
-    console.log(`     Payments will be skipped in dev mode.`);
-    console.log(`     Set it to your Fluid Wallet address to receive real payments.\n`);
+    console.log(`\n  FADP_WALLET_ADDRESS not set in .env`);
+    console.log(`  Payments will be skipped in dev mode.`);
+    console.log(`  Set it to your Fluid Wallet address to receive real payments.\n`);
   } else {
     console.log(`  Receiving payments to: ${PAY_TO}\n`);
   }
+});
+
+server.on("error", err => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`\n  Port ${PORT} is already in use.`);
+    console.error(`  Kill it:     kill $(lsof -ti:${PORT})`);
+    console.error(`  Or run on a different port:  PORT=3002 node server.js\n`);
+    process.exit(1);
+  } else { throw err; }
 });
