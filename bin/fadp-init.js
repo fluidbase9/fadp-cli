@@ -136,7 +136,8 @@ async function multiSelect(items) {
       const name  = isCur
         ? `${C.bold}${C.white}${items[i].name.padEnd(22)}${C.reset}`
         : `${C.white}${items[i].name.padEnd(22)}${C.reset}`;
-      log(`  ${arrow} ${box} ${name}  ${C.gray}${items[i].desc}${C.reset}`);
+      const hint = items[i].desc || (items[i].group === "universal" ? `${C.cyan}universal${C.reset}` : items[i].dir ? `${C.gray}${items[i].dir}${C.reset}` : "");
+      log(`  ${arrow} ${box} ${name}  ${C.gray}${hint}${C.reset}`);
     }
     // move cursor back up
     process.stdout.write(`\x1b[${items.length}A`);
@@ -182,6 +183,65 @@ async function multiSelect(items) {
       } else if (key === "") {
         process.exit();
       }
+      clearRender();
+      render();
+    });
+  });
+}
+
+// ─── Single-select (pick one agent target) ───────────────────────────────────
+
+// ─── Installation scope selector (Project vs Global) ─────────────────────────
+
+async function selectScope() {
+  const SCOPE_OPTS = [
+    {
+      key:   "project",
+      label: `${C.bold}${C.white}Project${C.reset}`,
+      desc:  `Install in current directory ${C.gray}(committed with your project)${C.reset}`,
+    },
+    {
+      key:   "global",
+      label: `${C.white}Global${C.reset}`,
+      desc:  `Install in ~/ home dir ${C.gray}(available in all projects)${C.reset}`,
+    },
+  ];
+
+  let cursor = 0;
+
+  function render() {
+    process.stdout.write("\x1b[?25l");
+    for (let i = 0; i < SCOPE_OPTS.length; i++) {
+      const isCur = cursor === i;
+      const radio = isCur ? `${C.cyan}●${C.reset}` : `${C.gray}○${C.reset}`;
+      const arrow = isCur ? `${C.cyan}›${C.reset}` : " ";
+      log(`  ${arrow} ${radio}  ${SCOPE_OPTS[i].label}   ${SCOPE_OPTS[i].desc}`);
+    }
+    process.stdout.write(`\x1b[${SCOPE_OPTS.length}A`);
+  }
+
+  function clearRender() {
+    for (let i = 0; i < SCOPE_OPTS.length; i++) process.stdout.write("\x1b[2K\n");
+    process.stdout.write(`\x1b[${SCOPE_OPTS.length}A`);
+  }
+
+  return new Promise(resolve => {
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    nl();
+    render();
+    process.stdin.on("data", function handler(buf) {
+      const key = buf.toString();
+      if (key === "\x1b[A" || key === "k") cursor = (cursor - 1 + SCOPE_OPTS.length) % SCOPE_OPTS.length;
+      else if (key === "\x1b[B" || key === "j") cursor = (cursor + 1) % SCOPE_OPTS.length;
+      else if (key === "\r" || key === "\n") {
+        clearRender();
+        if (process.stdin.isTTY) process.stdin.setRawMode(false);
+        process.stdin.removeListener("data", handler);
+        process.stdout.write("\x1b[?25h");
+        resolve(SCOPE_OPTS[cursor].key);
+        return;
+      } else if (key === "\x03") { process.exit(); }
       clearRender();
       render();
     });
@@ -237,6 +297,67 @@ const AGENT_SKILLS = [
   { name: "deploy-contract",    desc: "Deploy Solidity contracts to Base mainnet" },
 ];
 
+// ─── Agent targets — where skills get installed ──────────────────────────────
+
+const AGENT_TARGETS = [
+  // Universal (.agents/skills/) — all 15 universal-standard agents read this dir
+  { key: "universal",      name: "Universal  (all compatible agents)", dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "amp",            name: "Amp",                                dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "antigravity",    name: "Antigravity",                        dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "cline",          name: "Cline",                              dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "codex",          name: "Codex",                              dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "cursor",         name: "Cursor",                             dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "deepagents",     name: "Deep Agents",                        dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "dexto",          name: "Dexto",                              dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "firebender",     name: "Firebender",                         dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "gemini-cli",     name: "Gemini CLI",                         dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "github-copilot", name: "GitHub Copilot",                     dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "kimi-cli",       name: "Kimi Code CLI",                      dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "opencode",       name: "OpenCode",                           dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "replit",         name: "Replit",                             dir: ".agents/skills", ext: "md",  group: "universal" },
+  { key: "warp",           name: "Warp",                               dir: ".agents/skills", ext: "md",  group: "universal" },
+  // Dedicated — each agent reads its own directory
+  { key: "adal",           name: "AdaL",                               dir: ".adal/skills",          ext: "md",  group: "dedicated" },
+  { key: "aider-desk",     name: "AiderDesk",                          dir: ".aider/skills",          ext: "md",  group: "dedicated" },
+  { key: "rovodev",        name: "Atlassian Rovo Dev",                 dir: ".rovodev/skills",        ext: "md",  group: "dedicated" },
+  { key: "augment",        name: "Augment",                            dir: ".augment/skills",        ext: "md",  group: "dedicated" },
+  { key: "claude-code",    name: "Claude Code",                        dir: ".claude/skills",         ext: "md",  group: "dedicated" },
+  { key: "codestudio",     name: "Code Studio",                        dir: ".codestudio/skills",     ext: "md",  group: "dedicated" },
+  { key: "codearts-agent", name: "CodeArts Agent",                     dir: ".codearts/skills",       ext: "md",  group: "dedicated" },
+  { key: "codebuddy",      name: "CodeBuddy",                          dir: ".codebuddy/skills",      ext: "md",  group: "dedicated" },
+  { key: "codemaker",      name: "Codemaker",                          dir: ".codemaker/skills",      ext: "md",  group: "dedicated" },
+  { key: "command-code",   name: "Command Code",                       dir: ".command-code/skills",   ext: "md",  group: "dedicated" },
+  { key: "continue",       name: "Continue",                           dir: ".continue/rules",        ext: "md",  group: "dedicated" },
+  { key: "cortex",         name: "Cortex Code",                        dir: ".cortex/skills",         ext: "md",  group: "dedicated" },
+  { key: "crush",          name: "Crush",                              dir: ".crush/skills",          ext: "md",  group: "dedicated" },
+  { key: "devin",          name: "Devin (for Terminal)",               dir: ".devin/skills",          ext: "md",  group: "dedicated" },
+  { key: "droid",          name: "Droid (Factory AI)",                 dir: ".droid/skills",          ext: "md",  group: "dedicated" },
+  { key: "forgecode",      name: "ForgeCode",                          dir: ".forgecode/skills",      ext: "md",  group: "dedicated" },
+  { key: "goose",          name: "Goose",                              dir: ".goose/skills",          ext: "md",  group: "dedicated" },
+  { key: "bob",            name: "IBM Bob",                            dir: ".bob/skills",            ext: "md",  group: "dedicated" },
+  { key: "iflow-cli",      name: "iFlow CLI",                          dir: ".iflow/skills",          ext: "md",  group: "dedicated" },
+  { key: "junie",          name: "Junie",                              dir: ".junie/skills",          ext: "md",  group: "dedicated" },
+  { key: "kilo",           name: "Kilo Code",                          dir: ".kilo/skills",           ext: "md",  group: "dedicated" },
+  { key: "kiro-cli",       name: "Kiro CLI",                           dir: ".kiro/skills",           ext: "md",  group: "dedicated" },
+  { key: "kode",           name: "Kode",                               dir: ".kode/skills",           ext: "md",  group: "dedicated" },
+  { key: "mcpjam",         name: "MCPJam",                             dir: ".mcpjam/skills",         ext: "md",  group: "dedicated" },
+  { key: "mistral-vibe",   name: "Mistral Vibe",                       dir: ".mistral/skills",        ext: "md",  group: "dedicated" },
+  { key: "mux",            name: "Mux",                                dir: ".mux/skills",            ext: "md",  group: "dedicated" },
+  { key: "neovate",        name: "Neovate",                            dir: ".neovate/skills",        ext: "md",  group: "dedicated" },
+  { key: "openclaw",       name: "OpenClaw",                           dir: ".openclaw/skills",       ext: "md",  group: "dedicated" },
+  { key: "openhands",      name: "OpenHands",                          dir: ".openhands/skills",      ext: "md",  group: "dedicated" },
+  { key: "pi",             name: "Pi",                                 dir: ".pi/skills",             ext: "md",  group: "dedicated" },
+  { key: "pochi",          name: "Pochi",                              dir: ".pochi/skills",          ext: "md",  group: "dedicated" },
+  { key: "qoder",          name: "Qoder",                              dir: ".qoder/skills",          ext: "md",  group: "dedicated" },
+  { key: "qwen-code",      name: "Qwen Code",                          dir: ".qwen/skills",           ext: "md",  group: "dedicated" },
+  { key: "roo",            name: "Roo Code",                           dir: ".roo/rules",             ext: "md",  group: "dedicated" },
+  { key: "tabnine-cli",    name: "Tabnine CLI",                        dir: ".tabnine/skills",        ext: "md",  group: "dedicated" },
+  { key: "trae",           name: "Trae",                               dir: ".trae/skills",           ext: "md",  group: "dedicated" },
+  { key: "trae-cn",        name: "Trae CN",                            dir: ".trae-cn/skills",        ext: "md",  group: "dedicated" },
+  { key: "windsurf",       name: "Windsurf",                           dir: ".windsurf/rules",        ext: "md",  group: "dedicated" },
+  { key: "zencoder",       name: "Zencoder",                           dir: ".zencoder/skills",       ext: "md",  group: "dedicated" },
+];
+
 // ─── Clone skills repo ────────────────────────────────────────────────────────
 
 const SKILLS_REPO = "https://github.com/fluidbase9/fluid-wallet-skills.git";
@@ -287,6 +408,98 @@ function symlinkSkills(selected) {
     }
   }
   return linked;
+}
+
+// ─── Install skills into chosen agent directory ───────────────────────────────
+
+function skillStub(skill) {
+  return [
+    `---`,
+    `name: fluid-${skill.name}`,
+    `description: ${skill.desc}`,
+    `---`,
+    ``,
+    `# fluid-${skill.name}`,
+    ``,
+    `${skill.desc}`,
+    ``,
+    `## Requirements`,
+    ``,
+    `Set \`FLUID_AGENT_KEY\` in your environment (generated by \`npx fadp\`).`,
+    ``,
+    `## Usage`,
+    ``,
+    `\`\`\`js`,
+    `import { FluidAgent } from '@fluid-wallet/agentkit';`,
+    `const agent = new FluidAgent({ agentKey: process.env.FLUID_AGENT_KEY });`,
+    `// agent can now ${skill.desc.toLowerCase()}`,
+    `\`\`\``,
+    ``,
+  ].join("\n");
+}
+
+function installSkillsForAgent(selected, target, scope) {
+  const base    = scope === "global" ? os.homedir() : process.cwd();
+  const baseDir = path.join(base, target.dir);
+  fs.mkdirSync(baseDir, { recursive: true });
+
+  const scopeTag = scope === "global"
+    ? `${C.magenta}global${C.reset}`
+    : `${C.blue}project${C.reset}`;
+
+  let count = 0;
+  for (const skill of selected) {
+    const srcDir = path.join(SKILLS_DIR, skill.name);
+
+    // ensure source exists (create stub if repo wasn't cloned)
+    if (!fs.existsSync(srcDir)) {
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(srcDir, "SKILL.md"), skillStub(skill));
+    }
+
+    if (target.group === "universal" && scope === "project") {
+      // Project + universal: symlink (stays in sync with cloned repo)
+      const dest = path.join(baseDir, `fluid-${skill.name}`);
+      if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
+      try {
+        fs.symlinkSync(srcDir, dest, "dir");
+        ok(`${scopeTag}  ${C.cyan}${target.dir}/fluid-${skill.name}/${C.reset}  ${C.gray}symlinked → ${target.name}${C.reset}`);
+        count++;
+      } catch (e) {
+        fail(`Could not symlink ${skill.name}: ${e.message}`);
+      }
+    } else {
+      // Global universal or any dedicated: copy file (symlinks across dirs are fragile)
+      const srcMd  = path.join(srcDir, "SKILL.md");
+      const isDir  = target.group === "universal";
+      const destDir = isDir ? path.join(baseDir, `fluid-${skill.name}`) : null;
+      const destFile = isDir
+        ? path.join(destDir, "SKILL.md")
+        : path.join(baseDir, `fluid-${skill.name}.${target.ext}`);
+
+      if (isDir) fs.mkdirSync(destDir, { recursive: true });
+
+      const content = fs.existsSync(srcMd)
+        ? fs.readFileSync(srcMd, "utf8")
+        : skillStub(skill);
+      fs.writeFileSync(destFile, content);
+
+      const shortPath = isDir
+        ? `${target.dir}/fluid-${skill.name}/`
+        : `${target.dir}/fluid-${skill.name}.${target.ext}`;
+      ok(`${scopeTag}  ${C.cyan}${shortPath}${C.reset}  ${C.gray}→ ${target.name}${C.reset}`);
+      count++;
+    }
+  }
+  return count;
+}
+
+function installSkillsForAgents(selected, agentTargets, scope) {
+  let total = 0;
+  for (const target of agentTargets) {
+    total += installSkillsForAgent(selected, target, scope);
+  }
+  return total;
 }
 
 // ─── Scaffold sample project ──────────────────────────────────────────────────
@@ -595,7 +808,7 @@ async function runModeInstall() {
 
   // ── agent skills ────────────────────────────────────────────────────────────
   step(stepNum++, "Agent Skills  (send, swap, balance, price…)");
-  log(`  ${C.dim}Fluid agent skill modules linked into ./agents/ in your project.${C.reset}\n`);
+  log(`  ${C.dim}54 agents supported — Universal (.agents/skills/) and dedicated dirs.${C.reset}\n`);
   if (await ask("Install agent skills?")) {
     log(`  ${C.dim}Repo: ${SKILLS_REPO}${C.reset}`);
     cloneSkillsRepo();
@@ -604,9 +817,25 @@ async function runModeInstall() {
     const chosen = await multiSelect(AGENT_SKILLS);
     nl();
     if (chosen.length > 0) {
-      const linked = symlinkSkills(chosen);
-      ok(`${C.bold}${linked} skill${linked === 1 ? "" : "s"} linked to ${C.cyan}./agents/${C.reset}`);
-      installed.push("agent-skills");
+      log(`  ${C.bold}Which agents do you want to install to?${C.reset}`);
+      log(`  ${C.dim}${C.cyan}SPACE${C.reset}${C.dim} = select/deselect  ${C.reset}${C.cyan}A${C.reset}${C.dim} = select all  ${C.reset}${C.cyan}ENTER${C.reset}${C.dim} = confirm${C.reset}`);
+      const agentTargets = await multiSelect(AGENT_TARGETS);
+      nl();
+      if (agentTargets.length > 0) {
+        log(`  ${C.bold}Installation scope${C.reset}`);
+        const scope = await selectScope();
+        nl();
+        const scopeLabel = scope === "global" ? `${C.magenta}global ~/${C.reset}` : `${C.blue}project ./${C.reset}`;
+        const names = agentTargets.map(t => t.name).join(", ");
+        ok(`Installing ${C.bold}${chosen.length} skill${chosen.length === 1 ? "" : "s"}${C.reset} into ${C.bold}${agentTargets.length} agent${agentTargets.length === 1 ? "" : "s"}${C.reset}  [${scopeLabel}]`);
+        log(`  ${C.dim}${names}${C.reset}\n`);
+        const count = installSkillsForAgents(chosen, agentTargets, scope);
+        nl();
+        ok(`${C.bold}${count} installation${count === 1 ? "" : "s"} complete${C.reset}`);
+        installed.push("agent-skills");
+      } else {
+        warn("No agents selected.");
+      }
     } else {
       warn("No skills selected.");
     }
@@ -644,7 +873,8 @@ async function runModeInstall() {
   }
   nl();
   log(`  ${C.dim}Installed: ${installed.length ? installed.join(", ") : "none"}${C.reset}`);
-  log(`  ${C.dim}Keys in .env + .env.fadp  ·  Docs: fluidnative.com/fadp${C.reset}`);
+  log(`  ${C.dim}Skills in your agent's directory  ·  Keys in .env + .env.fadp${C.reset}`);
+  log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
   nl();
 }
 
@@ -662,15 +892,30 @@ async function runModeProject() {
   nl();
 
   step(4, "Select Agent Skills to Install");
-  log(`  ${C.dim}Choose which Fluid agent skills to symlink into ${C.reset}${C.cyan}./agents/${C.reset}`);
+  log(`  ${C.dim}Choose which Fluid agent skills to install:${C.reset}`);
   const chosen = await multiSelect(AGENT_SKILLS);
   nl();
   if (chosen.length === 0) {
     warn("No skills selected. Run `fadp` again to install skills.");
   } else {
-    const linked = symlinkSkills(chosen);
+    log(`  ${C.bold}Which agents do you want to install to?${C.reset}`);
+    log(`  ${C.dim}${C.cyan}SPACE${C.reset}${C.dim} = select/deselect  ${C.reset}${C.cyan}A${C.reset}${C.dim} = select all  ${C.reset}${C.cyan}ENTER${C.reset}${C.dim} = confirm${C.reset}`);
+    const agentTargets = await multiSelect(AGENT_TARGETS);
     nl();
-    ok(`${C.bold}${linked} skill${linked === 1 ? "" : "s"} installed to ./agents/${C.reset}`);
+    if (agentTargets.length > 0) {
+      log(`  ${C.bold}Installation scope${C.reset}`);
+      const scope = await selectScope();
+      nl();
+      const scopeLabel = scope === "global" ? `${C.magenta}global ~/${C.reset}` : `${C.blue}project ./${C.reset}`;
+      const names = agentTargets.map(t => t.name).join(", ");
+      ok(`Installing ${C.bold}${chosen.length} skill${chosen.length === 1 ? "" : "s"}${C.reset} into ${C.bold}${agentTargets.length} agent${agentTargets.length === 1 ? "" : "s"}${C.reset}  [${scopeLabel}]`);
+      log(`  ${C.dim}${names}${C.reset}\n`);
+      const count = installSkillsForAgents(chosen, agentTargets, scope);
+      nl();
+      ok(`${C.bold}${count} installation${count === 1 ? "" : "s"} complete${C.reset}`);
+    } else {
+      warn("No agents selected — run `fadp` again to install skills.");
+    }
   }
 
   step(5, "Sample TypeScript Project");
@@ -693,7 +938,7 @@ async function runModeProject() {
   log(`  ${C.cyan}[5]${C.reset}  ${C.bold}node agent.js${C.reset}                ${C.dim}← terminal 2: run paying agent${C.reset}`);
   nl();
   log(`  ${C.dim}Keys saved in .env.fadp — run: echo '.env.fadp' >> .gitignore${C.reset}`);
-  log(`  ${C.dim}Agent skills in ./agents/  —  Docs: fluidnative.com/fadp${C.reset}`);
+  log(`  ${C.dim}Skills installed into your agent's directory  —  Docs: fluidnative.com/fadp${C.reset}`);
   nl();
 }
 

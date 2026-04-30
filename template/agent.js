@@ -1,45 +1,66 @@
 /**
- * FADP Sample — Paying Agent
+ * FADP Sample — Paying Agent  (FADP/1.0)
  *
- * An AI agent that calls the gated server endpoint.
- * When it receives HTTP 402, it automatically pays via Fluid Wallet
- * and retries the request. It also uses installed agent skills
- * (balance, swap, send, price) to operate autonomously.
+ * Uses your FLUID_AGENT_KEY (fwag_...) to autonomously:
+ *   1. Show wallet balance — checks funds BEFORE attempting any payment
+ *   2. Call a FADP-gated endpoint — auto-pay on 402, retry with proof
+ *   3. Send USDC to another agent (agent-to-agent payment)
+ *   4. Fetch a live token price
+ *
+ * Every payment shows a full receipt with BaseScan explorer proof.
+ * If balance is too low, you are told exactly how to fund the wallet.
  *
  * Run:  node agent.js
  */
 
 "use strict";
 
-const https  = require("https");
-const http   = require("http");
-const crypto = require("crypto");
-const fs     = require("fs");
-const path   = require("path");
+require("dotenv").config();
+
+const https = require("https");
+const http  = require("http");
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const FLUID_API_URL  = process.env.FLUID_API_URL   || "https://fluidnative.com";
-const FLDP_KEY_NAME  = process.env.FLDP_API_KEY_NAME;
-const FLDP_KEY_JSON  = process.env.FLDP_API_KEY_PRIVATE_KEY
-  ? JSON.parse(process.env.FLDP_API_KEY_PRIVATE_KEY)
-  : null;
-const SERVER_URL     = `http://localhost:${process.env.PORT || 3001}`;
+const FLUID_API_URL   = process.env.FLUID_API_URL  || "https://fluidnative.com";
+const FLUID_AGENT_KEY = process.env.FLUID_AGENT_KEY;  // fwag_...
+const SERVER_URL      = `http://localhost:${process.env.PORT || 3001}`;
 
-// ── ANSI ──────────────────────────────────────────────────────────────────────
+if (!FLUID_AGENT_KEY || !FLUID_AGENT_KEY.startsWith("fwag_")) {
+  console.error([
+    "",
+    "  ✗  FLUID_AGENT_KEY is not set or invalid.",
+    "     It must start with fwag_ — run fadp-cli setup to generate one.",
+    "",
+  ].join("\n"));
+  process.exit(1);
+}
+
+// ── ANSI colour helpers ───────────────────────────────────────────────────────
 const C = {
-  reset: "\x1b[0m", green: "\x1b[32m", cyan: "\x1b[36m",
-  yellow: "\x1b[33m", red: "\x1b[31m", gray: "\x1b[90m", bold: "\x1b[1m",
+  reset:  "\x1b[0m",
+  bold:   "\x1b[1m",
+  dim:    "\x1b[2m",
+  green:  "\x1b[32m",
+  cyan:   "\x1b[36m",
+  yellow: "\x1b[33m",
+  red:    "\x1b[31m",
+  gray:   "\x1b[90m",
+  blue:   "\x1b[34m",
+  white:  "\x1b[37m",
 };
-const log  = m => console.log(m);
-const ok   = m => log(`  ${C.green}✓${C.reset}  ${m}`);
-const info = m => log(`  ${C.cyan}→${C.reset}  ${m}`);
-const warn = m => log(`  ${C.yellow}⚠${C.reset}  ${m}`);
+const log  = m  => console.log(m);
+const ok   = m  => log(`  ${C.green}✓${C.reset}  ${m}`);
+const info = m  => log(`  ${C.cyan}→${C.reset}  ${m}`);
+const warn = m  => log(`  ${C.yellow}⚠${C.reset}  ${m}`);
+const err  = m  => log(`  ${C.red}✗${C.reset}  ${m}`);
+const div  = () => log(`  ${C.gray}${"─".repeat(60)}${C.reset}`);
 
 // ── HTTP helper ────────────────────────────────────────────────────────────────
+// Returns { status, body, headers }.  headers is the Node IncomingMessage object.
 function httpRequest(urlStr, opts = {}, body = null) {
   return new Promise((resolve, reject) => {
-    const url = new URL(urlStr);
-    const mod = url.protocol === "https:" ? https : http;
+    const url     = new URL(urlStr);
+    const mod     = url.protocol === "https:" ? https : http;
     const payload = body ? JSON.stringify(body) : null;
     const options = {
       hostname: url.hostname,
@@ -48,7 +69,7 @@ function httpRequest(urlStr, opts = {}, body = null) {
       method:   opts.method || "GET",
       headers:  {
         "Content-Type": "application/json",
-        "User-Agent":   "fadp-sample-agent/1.0",
+        "User-Agent":   "fadp-agent/1.0",
         ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {}),
         ...(opts.headers || {}),
       },
@@ -57,11 +78,9 @@ function httpRequest(urlStr, opts = {}, body = null) {
       let data = "";
       res.on("data", c => (data += c));
       res.on("end",  () => {
-        try {
-          resolve({ status: res.statusCode, body: JSON.parse(data), headers: res.headers });
-        } catch {
-          resolve({ status: res.statusCode, body: data, headers: res.headers });
-        }
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { parsed = data; }
+        resolve({ status: res.statusCode, body: parsed, headers: res.headers });
       });
     });
     req.on("error", reject);
@@ -70,138 +89,319 @@ function httpRequest(urlStr, opts = {}, body = null) {
   });
 }
 
-// ── FLDP signing ───────────────────────────────────────────────────────────────
-function signRequest(keyName, privateKeyPem, payload) {
-  const sign    = crypto.createSign("SHA256");
-  sign.update(payload);
-  sign.end();
-  return sign.sign({ key: privateKeyPem, dsaEncoding: "ieee-p1363" }, "base64");
+// ── Fluid API (always sends X-Agent-Key) ──────────────────────────────────────
+function fluidApi(path, method = "GET", body = null) {
+  return httpRequest(`${FLUID_API_URL}${path}`, {
+    method,
+    headers: { "X-Agent-Key": FLUID_AGENT_KEY },
+  }, body);
 }
 
-// ── Pay for a 402 response ─────────────────────────────────────────────────────
-async function payForAccess(paymentInfo) {
-  info(`Paying ${paymentInfo.amount} ${paymentInfo.currency} to ${paymentInfo.recipient}…`);
+// ── Receipt printer ───────────────────────────────────────────────────────────
+// Shows every detail of a transaction + a clickable BaseScan explorer link.
+function printReceipt(payRes) {
+  const { txHash, explorerUrl, receipt } = payRes.body || {};
+  if (!txHash) return;
 
-  if (!FLDP_KEY_NAME || !FLDP_KEY_JSON) {
-    warn("No FLDP keys found — set FLDP_API_KEY_NAME and FLDP_API_KEY_PRIVATE_KEY in .env");
-    return null;
-  }
+  log("");
+  log(`  ${C.bold}${C.green}  ┌─ PAYMENT RECEIPT ─────────────────────────────────────┐${C.reset}`);
 
-  const nonce     = crypto.randomBytes(16).toString("hex");
-  const timestamp = Date.now().toString();
-  const payload   = `${nonce}.${timestamp}`;
-  const signature = signRequest(FLDP_KEY_NAME, FLDP_KEY_JSON.privateKey, payload);
+  if (receipt) {
+    log(`  ${C.bold}  │ Receipt ID:  ${C.reset}${receipt.id ?? "—"}`);
+    log(`  ${C.bold}  │ Protocol:    ${C.reset}${receipt.protocol ?? "FADP/1.0"}`);
+    log(`  ${C.bold}  │ Network:     ${C.reset}${receipt.network ?? "Base Mainnet"} (Chain ${receipt.chainId ?? 8453})`);
+    log(`  ${C.bold}  │ Timestamp:   ${C.reset}${receipt.timestamp ?? new Date().toISOString()}`);
+    log(`  ${C.bold}  │`);
 
-  try {
-    const res = await httpRequest(
-      `${FLUID_API_URL}/api/fadp/pay`,
-      {
-        method: "POST",
-        headers: {
-          "X-FLDP-Key-Name":  FLDP_KEY_NAME,
-          "X-FLDP-Signature": signature,
-          "X-FLDP-Nonce":     nonce,
-          "X-FLDP-Timestamp": timestamp,
-        },
-      },
-      {
-        amount:    paymentInfo.amount,
-        currency:  paymentInfo.currency,
-        network:   paymentInfo.network,
-        recipient: paymentInfo.recipient,
-        endpoint:  paymentInfo.endpoint,
-      },
-    );
+    const fromUoi = receipt.from?.uoi ?? null;
+    const fromAddr = receipt.from?.address ?? "—";
+    log(`  ${C.bold}  │ From (sender)${C.reset}`);
+    if (fromUoi)  log(`  ${C.bold}  │   UOI:     ${C.reset}${C.cyan}${fromUoi}${C.reset}`);
+    log(`  ${C.bold}  │   Address: ${C.reset}${fromAddr}`);
 
-    if (res.body && res.body.receipt) {
-      ok(`Payment sent — receipt: ${res.body.receipt.slice(0, 20)}…`);
-      return res.body.receipt;
-    }
+    const toUoi  = receipt.to?.uoi ?? null;
+    const toAddr = receipt.to?.address ?? "—";
+    log(`  ${C.bold}  │`);
+    log(`  ${C.bold}  │ To (recipient)${C.reset}`);
+    if (toUoi)    log(`  ${C.bold}  │   UOI:     ${C.reset}${C.cyan}${toUoi}${C.reset}`);
+    log(`  ${C.bold}  │   Address: ${C.reset}${toAddr}`);
 
-    warn(`Payment API response: ${JSON.stringify(res.body)}`);
-    // Return a mock receipt so the demo keeps running without live API
-    return `mock_receipt_${nonce}`;
-  } catch (e) {
-    warn(`Payment failed (${e.message}) — using mock receipt for demo`);
-    return `mock_receipt_${nonce}`;
-  }
-}
-
-// ── Skill loader ───────────────────────────────────────────────────────────────
-function loadSkill(skillName) {
-  const candidates = [
-    path.join(__dirname, "agents", skillName, "index.js"),
-    path.join(__dirname, "fluid-wallet-skills", skillName, "index.js"),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return require(p);
-  }
-  // Skill not implemented yet — return a stub
-  return {
-    run: async (args) => ({
-      skill: skillName,
-      status: "stub",
-      message: `Skill '${skillName}' is registered but not yet implemented. Add agents/${skillName}/index.js to implement it.`,
-      args,
-    }),
-  };
-}
-
-// ── Main agent loop ────────────────────────────────────────────────────────────
-async function main() {
-  log(`\n${C.bold}${C.cyan}  🤖 FADP Sample Agent${C.reset}`);
-  log(`  Auto-paying agent that calls FADP-gated APIs\n`);
-
-  // ── Task 1: Call the gated endpoint (auto-pay on 402) ────────────────────────
-  log(`${C.bold}  Task 1: Call gated endpoint${C.reset}`);
-  info(`GET ${SERVER_URL}/api/data`);
-
-  let res = await httpRequest(`${SERVER_URL}/api/data`).catch(e => {
-    warn(`Server not reachable: ${e.message}`);
-    return null;
-  });
-
-  if (!res) {
-    warn("Start the server first:  node server.js");
-  } else if (res.status === 402) {
-    info(`Got 402 — payment required. Initiating FADP payment…`);
-    const receipt = await payForAccess(res.body.payment);
-    if (receipt) {
-      // Retry with payment receipt
-      res = await httpRequest(`${SERVER_URL}/api/data`, {
-        headers: { "X-Payment-Receipt": receipt },
-      });
-      if (res.status === 200) {
-        ok(`Access granted! Response:`);
-        log(`\n${C.gray}${JSON.stringify(res.body, null, 2)}${C.reset}\n`);
-      } else {
-        warn(`Still got ${res.status}: ${JSON.stringify(res.body)}`);
+    if (receipt.payment) {
+      log(`  ${C.bold}  │`);
+      log(`  ${C.bold}  │ Amount:      ${C.reset}${C.green}${receipt.payment.amount} ${receipt.payment.token}${C.reset}`);
+      if (receipt.payment.tokenAddress) {
+        log(`  ${C.bold}  │ Token Addr:  ${C.reset}${C.gray}${receipt.payment.tokenAddress}${C.reset}`);
       }
     }
-  } else if (res.status === 200) {
-    ok(`Free access (no payment needed). Response:`);
-    log(`\n${C.gray}${JSON.stringify(res.body, null, 2)}${C.reset}\n`);
   }
 
-  // ── Task 2: Run installed agent skills ────────────────────────────────────────
-  log(`${C.bold}  Task 2: Run agent skills${C.reset}`);
+  log(`  ${C.bold}  │`);
+  log(`  ${C.bold}  │ Tx Hash:     ${C.reset}${txHash}`);
+  const link = explorerUrl ?? `https://basescan.org/tx/${txHash}`;
+  log(`  ${C.bold}  │ BaseScan:    ${C.reset}${C.blue}${link}${C.reset}`);
+  log(`  ${C.bold}${C.green}  └───────────────────────────────────────────────────────┘${C.reset}`);
+  log("");
+}
 
-  const skillsToRun = ["balance", "price", "quote"];
-  for (const skillName of skillsToRun) {
-    info(`Running skill: ${C.cyan}${skillName}${C.reset}`);
-    try {
-      const skill  = loadSkill(skillName);
-      const result = await skill.run({ apiUrl: FLUID_API_URL, keyName: FLDP_KEY_NAME });
-      ok(`${skillName}: ${JSON.stringify(result)}`);
-    } catch (e) {
-      warn(`${skillName} errored: ${e.message}`);
+// ── Balance checker ───────────────────────────────────────────────────────────
+// Fetches USDC balance on Base.
+// Returns { balances, walletAddress, usdc } where usdc is a number.
+async function getBalance(chain = "base") {
+  const res = await fluidApi(`/v1/agents/balance?chain=${chain}`);
+  if (!res || res.status !== 200) return { balances: [], walletAddress: null, usdc: 0 };
+  const { balances = [], walletAddress } = res.body;
+  const usdcEntry = balances.find(b =>
+    b.token?.toUpperCase() === "USDC" && (b.chain === chain || !b.chain)
+  );
+  const usdc = parseFloat(usdcEntry?.amount ?? "0");
+  return { balances, walletAddress, usdc };
+}
+
+// ── Pre-payment balance check ─────────────────────────────────────────────────
+// Shows current balance. If insufficient, prints funding instructions and returns false.
+async function checkBalanceBeforePayment(amount, token = "USDC", chain = "base") {
+  info(`Checking ${token} balance on ${chain} before payment…`);
+
+  const { balances, walletAddress, usdc } = await getBalance(chain);
+
+  log("");
+  log(`  ${C.bold}  Wallet Balance (${chain}):${C.reset}`);
+  if (balances.length === 0) {
+    log(`    ${C.gray}No balances found${C.reset}`);
+  }
+  for (const b of balances) {
+    const highlight = b.token?.toUpperCase() === "USDC" ? C.green : C.gray;
+    log(`    ${highlight}${b.token}: ${b.amount}${C.reset}`);
+  }
+  if (walletAddress) {
+    log(`  ${C.dim}  Wallet: ${walletAddress}${C.reset}`);
+  }
+  log("");
+
+  const needed = parseFloat(amount);
+  if (token.toUpperCase() !== "USDC") {
+    ok(`Proceeding (non-USDC payment — balance check skipped for ${token})`);
+    return true;
+  }
+
+  if (usdc < needed) {
+    err(`Insufficient USDC balance`);
+    log(`    Have:   ${C.yellow}${usdc.toFixed(6)} USDC${C.reset}`);
+    log(`    Need:   ${C.green}${needed.toFixed(6)} USDC${C.reset}`);
+    log(`    Short:  ${C.red}${(needed - usdc).toFixed(6)} USDC${C.reset}`);
+    log("");
+    log(`  ${C.bold}${C.cyan}  How to fund your wallet:${C.reset}`);
+    log(`    1. Network: Base mainnet (Chain ID 8453)`);
+    log(`    2. Token:   USDC (native on Base)`);
+    log(`       Contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`);
+    if (walletAddress) {
+      log(`    3. Send ${needed.toFixed(6)} USDC or more to:`);
+      log(`       ${C.bold}${walletAddress}${C.reset}`);
+    } else {
+      log(`    3. Log in to fluidnative.com → Settings to find your wallet address`);
+    }
+    log(`    4. Then run this agent again.\n`);
+    return false;
+  }
+
+  ok(`Balance OK — ${usdc.toFixed(6)} USDC available (need ${needed.toFixed(6)})`);
+  return true;
+}
+
+// ── FADP: auto-pay on 402, retry with proof ────────────────────────────────────
+// Full FADP/1.0 implementation:
+//   1. Check balance before paying
+//   2. Pay via Fluid (X-Agent-Key → server derives wallet key → signs on-chain)
+//   3. Print receipt with BaseScan proof
+//   4. Retry original request with X-FADP-Proof
+async function fadpFetch(url, opts = {}) {
+  const res = await httpRequest(url, opts).catch(e => {
+    warn(`Could not reach server at ${url}: ${e.message}`);
+    return null;
+  });
+  if (!res) return null;
+  if (res.status !== 402) return res;
+
+  // ── Parse X-FADP-Required header ─────────────────────────────────────────
+  const fadpHeader = res.headers["x-fadp-required"];
+  if (!fadpHeader) {
+    warn("Got 402 but no X-FADP-Required header — not a FADP/1.0 endpoint");
+    return res;
+  }
+
+  let payment;
+  try { payment = JSON.parse(fadpHeader); }
+  catch { warn("X-FADP-Required header is not valid JSON"); return res; }
+
+  const { amount = "0.01", token = "USDC", chain = "base", payTo, nonce, description } = payment;
+
+  log(`\n  ${C.bold}  FADP Payment Required${C.reset}`);
+  div();
+  log(`  Service:  ${description ?? "API access"}`);
+  log(`  Amount:   ${C.green}${amount} ${token}${C.reset} on ${chain}`);
+  log(`  Payee:    ${payTo ?? "(unset)"}`);
+  div();
+
+  if (!payTo) {
+    err("402 response has no payTo address — cannot pay");
+    return null;
+  }
+
+  // ── Check balance before paying ───────────────────────────────────────────
+  const canPay = await checkBalanceBeforePayment(amount, token, chain);
+  if (!canPay) {
+    err("Payment aborted — please fund your wallet and try again");
+    return null;
+  }
+
+  // ── Send payment via Fluid ────────────────────────────────────────────────
+  info(`Sending ${amount} ${token} via Fluid Wallet…`);
+  const payRes = await fluidApi("/v1/agents/send", "POST", { to: payTo, amount, token, chain });
+
+  if (!payRes || payRes.status !== 200) {
+    err(`Payment failed (${payRes?.status}): ${JSON.stringify(payRes?.body)}`);
+    return null;
+  }
+
+  const { txHash } = payRes.body;
+  ok(`Payment confirmed on-chain!`);
+
+  // ── Print full receipt ────────────────────────────────────────────────────
+  printReceipt(payRes);
+
+  // ── Retry original request with X-FADP-Proof ─────────────────────────────
+  info(`Retrying ${url} with payment proof…`);
+  return httpRequest(url, {
+    ...opts,
+    headers: {
+      ...(opts.headers || {}),
+      "X-FADP-Proof": JSON.stringify({
+        txHash,
+        nonce,
+        agentKeyPrefix: FLUID_AGENT_KEY.slice(0, 12),
+        timestamp: Math.floor(Date.now() / 1000),
+      }),
+    },
+  });
+}
+
+// ── Agent-to-agent USDC payment ───────────────────────────────────────────────
+// Sends USDC directly to another Fluid Wallet user by email.
+// Checks balance first and prints the full receipt.
+async function agentPay(toEmail, amount, token = "USDC", memo = "") {
+  log(`\n  ${C.bold}  Agent-to-Agent Payment${C.reset}`);
+  div();
+  log(`  To:     ${toEmail}`);
+  log(`  Amount: ${C.green}${amount} ${token}${C.reset}`);
+  if (memo) log(`  Memo:   ${memo}`);
+  div();
+
+  // Check balance first
+  const canPay = await checkBalanceBeforePayment(amount, token);
+  if (!canPay) {
+    err("Payment aborted — please fund your wallet and try again");
+    return null;
+  }
+
+  info(`Sending ${amount} ${token} to ${toEmail}…`);
+  const res = await fluidApi("/v1/agents/agent-pay", "POST", {
+    toEmail, amount, token, memo,
+  });
+
+  if (!res || res.status !== 200) {
+    err(`Payment failed (${res?.status}): ${JSON.stringify(res?.body)}`);
+    return null;
+  }
+
+  ok(`Payment sent!`);
+  printReceipt(res);
+  return res.body;
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+async function main() {
+  log(`\n${C.bold}${C.cyan}  ╔══════════════════════════════════════════╗${C.reset}`);
+  log(`${C.bold}${C.cyan}  ║     FADP Sample Agent  (FADP/1.0)        ║${C.reset}`);
+  log(`${C.bold}${C.cyan}  ╚══════════════════════════════════════════╝${C.reset}`);
+  log(`  ${C.gray}Agent key: ${FLUID_AGENT_KEY.slice(0, 16)}…${C.reset}`);
+  log(`  ${C.gray}Fluid API: ${FLUID_API_URL}${C.reset}\n`);
+
+  // ── Step 0: Show identity + balance upfront ───────────────────────────────
+  log(`${C.bold}  Step 0: Agent identity & wallet balance${C.reset}`);
+  div();
+
+  const meRes = await fluidApi("/v1/agents/me");
+  if (meRes?.status === 200) {
+    const { email, keyPrefix, name, scopes } = meRes.body;
+    ok(`Authenticated as: ${email}`);
+    ok(`Key name:         ${name ?? keyPrefix}`);
+    ok(`Scopes:           ${(scopes || []).join(", ") || "(none)"}`);
+  } else {
+    warn(`Could not verify identity: ${JSON.stringify(meRes?.body)}`);
+  }
+
+  log("");
+  const { balances, walletAddress, usdc } = await getBalance("base");
+  log(`  ${C.bold}  Current Wallet Balance (Base mainnet):${C.reset}`);
+  if (balances.length === 0) {
+    warn("No balances found — wallet may be empty or not yet active");
+  }
+  for (const b of balances) {
+    const highlight = b.token?.toUpperCase() === "USDC" ? C.green : C.gray;
+    ok(`${highlight}${b.token}: ${b.amount}${C.reset} on ${b.chain}`);
+  }
+  if (walletAddress) {
+    log(`  ${C.dim}  Wallet address: ${walletAddress}${C.reset}`);
+    log(`  ${C.dim}  BaseScan:       https://basescan.org/address/${walletAddress}${C.reset}`);
+  }
+  log("");
+
+  // ── Step 1: Call FADP-gated endpoint (auto-pay 402) ───────────────────────
+  log(`${C.bold}  Step 1: Call FADP-gated API endpoint${C.reset}`);
+  div();
+  info(`GET ${SERVER_URL}/api/data`);
+
+  const gatedRes = await fadpFetch(`${SERVER_URL}/api/data`);
+  if (gatedRes?.status === 200) {
+    ok(`Access granted! Data received:`);
+    log(`\n${C.gray}${JSON.stringify(gatedRes.body, null, 2)}${C.reset}\n`);
+  } else if (gatedRes) {
+    warn(`Got ${gatedRes.status}: ${JSON.stringify(gatedRes.body)}`);
+  }
+
+  // ── Step 2: Agent-to-agent payment demo ──────────────────────────────────
+  // Uncomment and set a real email to test agent-to-agent payments.
+  // const DEMO_RECIPIENT_EMAIL = "another-agent@example.com";
+  // if (DEMO_RECIPIENT_EMAIL) {
+  //   log(`${C.bold}  Step 2: Agent-to-agent payment${C.reset}`);
+  //   await agentPay(DEMO_RECIPIENT_EMAIL, "1.00", "USDC", "Demo payment");
+  // }
+
+  // ── Step 3: Fetch live ETH price ──────────────────────────────────────────
+  log(`${C.bold}  Step 2: Fetch live ETH price (Fluid crypto API)${C.reset}`);
+  div();
+  const priceRes = await fluidApi("/v1/agents/price?token=ethereum&currency=usd");
+  if (priceRes?.status === 200) {
+    const { price, source } = priceRes.body;
+    ok(`ETH: $${price} USD${source ? `  (source: ${source})` : ""}`);
+  } else {
+    warn(`Price fetch failed: ${JSON.stringify(priceRes?.body)}`);
+  }
+
+  // ── Step 4: Fetch USDC and SOL prices ────────────────────────────────────
+  const tokens = ["usd-coin", "solana"];
+  for (const t of tokens) {
+    const r = await fluidApi(`/v1/agents/price?token=${t}&currency=usd`);
+    if (r?.status === 200) {
+      const { price } = r.body;
+      ok(`${t}: $${price} USD`);
     }
   }
 
-  log(`\n${C.green}  ✓  Agent run complete${C.reset}\n`);
+  log(`\n${C.green}${C.bold}  ✓  Agent run complete${C.reset}\n`);
 }
 
 main().catch(e => {
-  console.error(e);
+  console.error(`\n  ${C.red}Fatal error:${C.reset}`, e.message ?? e);
   process.exit(1);
 });
