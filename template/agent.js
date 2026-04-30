@@ -17,8 +17,10 @@
 
 require("dotenv").config();
 
-const https = require("https");
-const http  = require("http");
+const https  = require("https");
+const http   = require("http");
+const { spawn } = require("child_process");
+const path   = require("path");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const FLUID_API_URL   = process.env.FLUID_API_URL  || "https://fluidnative.com";
@@ -319,6 +321,32 @@ async function agentPay(toEmail, amount, token = "USDC", memo = "") {
   return res.body;
 }
 
+// ── Auto-start server if not running ─────────────────────────────────────────
+function isServerUp(url) {
+  return new Promise(resolve => {
+    http.get(`${url}/health`, res => resolve(res.statusCode < 500))
+        .on("error", () => resolve(false));
+  });
+}
+
+async function ensureServer() {
+  if (await isServerUp(SERVER_URL)) return;
+  info("Server not running — starting server.js automatically…");
+  const serverPath = path.join(__dirname, "server.js");
+  const child = spawn(process.execPath, [serverPath], {
+    detached: true,
+    stdio:    "ignore",
+    env:      process.env,
+  });
+  child.unref();
+  // Wait up to 4s for it to be ready
+  for (let i = 0; i < 8; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    if (await isServerUp(SERVER_URL)) { ok("Server started."); return; }
+  }
+  warn("Server didn't respond in time — requests may fail.");
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   log(`\n${C.bold}${C.cyan}  ╔══════════════════════════════════════════╗${C.reset}`);
@@ -326,6 +354,8 @@ async function main() {
   log(`${C.bold}${C.cyan}  ╚══════════════════════════════════════════╝${C.reset}`);
   log(`  ${C.gray}Agent key: ${FLUID_AGENT_KEY.slice(0, 16)}…${C.reset}`);
   log(`  ${C.gray}Fluid API: ${FLUID_API_URL}${C.reset}\n`);
+
+  await ensureServer();
 
   // ── Step 0: Show identity + balance upfront ───────────────────────────────
   log(`${C.bold}  Step 0: Agent identity & wallet balance${C.reset}`);
