@@ -697,10 +697,6 @@ async function stepAccountAndKeys() {
   log(hr());
   nl();
 
-  writeEnvSnippet(keyName, privateKeyJson);
-  nl();
-  log(`  ${C.dim}Keys also written to ${C.reset}${C.cyan}.env.fadp${C.reset}${C.dim} — add it to .gitignore.${C.reset}`);
-  nl();
   await pressEnter("I have saved my key — press ENTER to continue");
 
   // ── Step 3: Fluid Agent Key (fwag_) ────────────────────────────────────────
@@ -744,12 +740,6 @@ async function stepAccountAndKeys() {
     log(hr());
     nl();
 
-    // Append to .env.fadp
-    const envPath = path.join(process.cwd(), ".env.fadp");
-    const append  = `\n# Fluid Agent Key — powers crypto operations (send, swap, balance)\nFLUID_AGENT_KEY="${agentKey}"\n`;
-    fs.appendFileSync(envPath, append);
-    ok(`Appended ${C.cyan}FLUID_AGENT_KEY${C.reset} to ${C.cyan}.env.fadp${C.reset}`);
-    nl();
     writeKeyToShellProfile(agentKey);
     nl();
     await pressEnter("I have saved my agent key — press ENTER to continue");
