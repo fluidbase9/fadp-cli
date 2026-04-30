@@ -894,12 +894,6 @@ async function runModeInstall() {
   } else { log(`  ${C.gray}Skipped.${C.reset}`); }
   nl();
 
-  // ── write keys to .env ──────────────────────────────────────────────────────
-  step(stepNum++, "Write keys to .env");
-  log(`  ${C.dim}Appending FADP keys to your project .env…${C.reset}\n`);
-  writeProjectEnv(keyName, privateKeyJson, agentKey);
-  nl();
-
   // ── summary ─────────────────────────────────────────────────────────────────
   log(hr("═"));
   log(`${C.bold}${C.green}  ✓  FADP ready in your project!${C.reset}`);
@@ -908,15 +902,14 @@ async function runModeInstall() {
   log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
   nl();
   log(`  ${C.cyan}[1]${C.reset}  ${C.bold}code .${C.reset}                       ${C.dim}← open this project in VS Code${C.reset}`);
-  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}echo '.env.fadp' >> .gitignore${C.reset}${C.dim}  ← protect your keys${C.reset}`);
   if (installed.includes("fadp-sample")) {
-    log(`  ${C.cyan}[3]${C.reset}  ${C.bold}cd fadp-sample && npm install${C.reset}${C.dim}   ← install sample dependencies${C.reset}`);
-    log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node fadp-sample/server.js${C.reset}   ${C.dim}← terminal 1: gated API server${C.reset}`);
-    log(`  ${C.cyan}[5]${C.reset}  ${C.bold}node fadp-sample/agent.js${C.reset}    ${C.dim}← terminal 2: paying agent${C.reset}`);
+    log(`  ${C.cyan}[2]${C.reset}  ${C.bold}cd fadp-sample && npm install${C.reset}${C.dim}   ← install sample dependencies${C.reset}`);
+    log(`  ${C.cyan}[3]${C.reset}  ${C.bold}node fadp-sample/server.js${C.reset}   ${C.dim}← terminal 1: gated API server${C.reset}`);
+    log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node fadp-sample/agent.js${C.reset}    ${C.dim}← terminal 2: paying agent${C.reset}`);
   }
   nl();
   log(`  ${C.dim}Installed: ${installed.length ? installed.join(", ") : "none"}${C.reset}`);
-  log(`  ${C.dim}Skills in your agent's directory  ·  Keys in .env + .env.fadp${C.reset}`);
+  log(`  ${C.dim}Skills in your agent's directory  ·  FLUID_AGENT_KEY exported to shell${C.reset}`);
   log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
   nl();
 }
@@ -963,7 +956,6 @@ async function runModeProject() {
 
   step(5, "Sample TypeScript Project");
   log(`  ${C.dim}Scaffolding fadp-sample/ — gated API server + paying agent.${C.reset}`);
-  log(`  ${C.dim}All your keys will be written to fadp-sample/.env automatically.${C.reset}`);
   nl();
   scaffoldSampleProject(keyName, privateKeyJson, agentKey);
   nl();
@@ -995,7 +987,7 @@ async function runModeProject() {
   log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node server.js${C.reset}               ${C.dim}← terminal 1: start gated API${C.reset}`);
   log(`  ${C.cyan}[5]${C.reset}  ${C.bold}node agent.js${C.reset}                ${C.dim}← terminal 2: run paying agent${C.reset}`);
   nl();
-  log(`  ${C.dim}Keys saved in .env.fadp — run: echo '.env.fadp' >> .gitignore${C.reset}`);
+  log(`  ${C.dim}FLUID_AGENT_KEY exported to ~/.zshrc — all agents pick it up automatically${C.reset}`);
   log(`  ${C.dim}Skills installed into your agent's directory  —  Docs: fluidnative.com/fadp${C.reset}`);
   nl();
 }
