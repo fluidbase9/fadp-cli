@@ -1,13 +1,35 @@
 {
   "name": "@fluidwallet/fadp-cli",
-  "version": "1.6.9",
+  "version": "1.6.10",
   "description": "FADP Developer Setup CLI — built for the agent economy. MCP compatible. Know Your Agent (KYA) identity via UAI + Pauli Keys. Register your developer account, generate EC key pair, and scaffold agent skills on Base.",
   "bin": {
     "fadp": "./bin/fadp-init.js"
   },
   "scripts": {},
-  "files": ["bin", "template", "README.md"],
-  "keywords": ["fadp", "fluid", "wallet", "agentic", "developer", "ec-keys", "agent-skills", "cli", "setup", "mcp", "mcp-compatible", "model-context-protocol", "agent-economy", "know-your-agent", "kya", "agent-identity", "base-chain"],
+  "files": [
+    "bin",
+    "template",
+    "README.md"
+  ],
+  "keywords": [
+    "fadp",
+    "fluid",
+    "wallet",
+    "agentic",
+    "developer",
+    "ec-keys",
+    "agent-skills",
+    "cli",
+    "setup",
+    "mcp",
+    "mcp-compatible",
+    "model-context-protocol",
+    "agent-economy",
+    "know-your-agent",
+    "kya",
+    "agent-identity",
+    "base-chain"
+  ],
   "license": "MIT",
   "author": "Fluid Wallet <dev@fluidnative.com> (https://fluidnative.com)",
   "repository": {
