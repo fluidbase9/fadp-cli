@@ -7,7 +7,7 @@
   },
   "scripts": {},
   "files": ["bin", "template", "README.md"],
-  "keywords": ["fadp", "fluid", "wallet", "agentic", "developer", "ec-keys", "agent-skills", "cli", "setup"],
+  "keywords": ["fadp", "fluid", "wallet", "agentic", "developer", "ec-keys", "agent-skills", "cli", "setup", "mcp", "mcp-compatible", "model-context-protocol", "agent-economy", "know-your-agent", "kya", "agent-identity", "base-chain"],
   "license": "MIT",
   "author": "Fluid Wallet <dev@fluidnative.com> (https://fluidnative.com)",
   "repository": {

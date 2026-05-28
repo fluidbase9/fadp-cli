@@ -2,6 +2,9 @@
 
 Interactive setup CLI for the **Fluid Agentic Developer Protocol (FADP)**. Registers your developer account, generates a P-256 EC key pair, and optionally scaffolds a full TypeScript project with agent skills.
 
+> **The Next Trillion Agents. One Wallet to Power It All.**  
+> MCP compatible · Know Your Agent (KYA) ready · agent-identity native. Build something agents want.
+
 ## Usage
 
 ```bash
