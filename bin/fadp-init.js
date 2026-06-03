@@ -640,24 +640,28 @@ function writeEnvSnippet(fldpPrivateKeyPem, agentKey, walletKey) {
 async function selectMode() {
   const modes = [
     {
-      key:   "1",
-      title: `${C.bold}${C.cyan}Install SOR in my existing DeFi project${C.reset}`,
-      desc:  `${C.gray}Add SOR routing + price feeds to your project. No wallet needed.${C.reset}`,
+      key:      "a",
+      title:    `${C.bold}${C.cyan}SOR scaffold for developers${C.reset}`,
+      desc:     `${C.gray}Sample server + SOR integration scaffolded and ready to run.${C.reset}`,
+      disabled: false,
     },
     {
-      key:   "2",
-      title: `${C.bold}${C.cyan}SOR for agents${C.reset}`,
-      desc:  `${C.gray}Auto-setup Fluid wallet + install SOR skills into your existing agent.${C.reset}`,
+      key:      "b",
+      title:    `${C.bold}${C.cyan}Install SOR in my existing DeFi project${C.reset}`,
+      desc:     `${C.gray}Add SOR routing + price feeds to your project. No wallet needed.${C.reset}`,
+      disabled: false,
     },
     {
-      key:   "3",
-      title: `${C.bold}${C.white}Scaffold a full TypeScript project  (developer)${C.reset}`,
-      desc:  `${C.gray}Sample server + SOR integration scaffolded and ready to run.${C.reset}`,
+      key:      "c",
+      title:    `${C.bold}${C.gray}SOR for agents${C.reset}  ${C.yellow}(coming soon)${C.reset}`,
+      desc:     `${C.gray}Auto-setup Fluid wallet + install SOR skills into your existing agent.${C.reset}`,
+      disabled: true,
     },
     {
-      key:   "4",
-      title: `${C.bold}${C.white}Scaffold a full TypeScript project  (agents)${C.reset}`,
-      desc:  `${C.gray}Wallet auto-setup + agent skills + full sample project ready to run.${C.reset}`,
+      key:      "d",
+      title:    `${C.bold}${C.white}SOR scaffold for agents${C.reset}`,
+      desc:     `${C.gray}Wallet auto-setup + agent skills + full sample project ready to run.${C.reset}`,
+      disabled: false,
     },
   ];
 
@@ -670,9 +674,10 @@ async function selectMode() {
   }
 
   while (true) {
-    const ans = await prompt(`Choose ${C.cyan}1${C.reset}, ${C.cyan}2${C.reset}, ${C.cyan}3${C.reset} or ${C.cyan}4${C.reset}`);
-    if (["1","2","3","4"].includes(ans)) return ans;
-    warn("Enter 1, 2, 3 or 4");
+    const ans = (await prompt(`Choose ${C.cyan}a${C.reset}, ${C.cyan}b${C.reset}, ${C.cyan}c${C.reset} or ${C.cyan}d${C.reset}`)).toLowerCase().trim();
+    if (ans === "c") { warn("SOR for agents is coming soon — choose a, b or d"); continue; }
+    if (["a","b","d"].includes(ans)) return ans;
+    warn("Enter a, b or d");
   }
 }
 
@@ -1310,10 +1315,9 @@ async function runModeScaffoldAgents() {
 async function main() {
   await banner();
   const mode = await selectMode();
-  if      (mode === "1") await runModeInstallDeFi();
-  else if (mode === "2") await runModeSORAgents();
-  else if (mode === "3") await runModeScaffoldDev();
-  else                   await runModeScaffoldAgents();
+  if      (mode === "a") await runModeScaffoldDev();
+  else if (mode === "b") await runModeInstallDeFi();
+  else                   await runModeScaffoldAgents();  // d
 }
 
 main().catch(e => {
