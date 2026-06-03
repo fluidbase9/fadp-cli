@@ -642,7 +642,7 @@ async function selectMode() {
     {
       key:      "a",
       title:    `${C.bold}${C.cyan}SOR scaffold for developers${C.reset}`,
-      desc:     `${C.gray}Sample server + SOR integration scaffolded and ready to run.${C.reset}`,
+      desc:     `${C.gray}SOR routing + execute swap scaffolded. Fluid wallet auto-setup if execute swap enabled.${C.reset}`,
       disabled: false,
     },
     {
@@ -1116,12 +1116,12 @@ async function runModeSORAgents() {
 // ─── Mode 3: Scaffold for developers (no wallet needed) ───────────────────────
 
 async function runModeScaffoldDev() {
-  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Scaffold TypeScript project  (developer)${C.reset}\n`);
-  log(`  ${C.dim}Creates a ready-to-run server + SOR integration. No Fluid wallet needed.${C.reset}\n`);
+  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}SOR scaffold for developers${C.reset}\n`);
+  log(`  ${C.dim}SOR routing works without a wallet. Execute swap requires a Fluid wallet — you'll be prompted.${C.reset}\n`);
 
-  // ── packages ────────────────────────────────────────────────────────────────
+  // ── Step 1: SOR routing packages (no wallet needed) ─────────────────────────
   step(1, "fluid-fadp  (SOR routing + FADP/1.0 middleware)");
-  log(`  ${C.dim}Smart order routing across DEX venues + HTTP 402 payment gating.${C.reset}\n`);
+  log(`  ${C.dim}Smart order routing across DEX venues + price feeds. No wallet needed.${C.reset}\n`);
   if (await ask("Install fluid-fadp?")) {
     try {
       execSync("npm install fluid-fadp", { stdio: "pipe", cwd: process.cwd() });
@@ -1140,24 +1140,53 @@ async function runModeScaffoldDev() {
   } else { log(`  ${C.gray}Skipped.${C.reset}`); }
   nl();
 
-  // ── scaffold ────────────────────────────────────────────────────────────────
-  step(3, "Sample TypeScript Project");
-  log(`  ${C.dim}Scaffolding fadp-sample/ — gated API server + SOR integration.${C.reset}\n`);
-  scaffoldSampleProject(null, null, null);
+  // ── Step 3: Execute swap — requires Fluid wallet ─────────────────────────────
+  step(3, "Execute Swap  (sign + send on-chain)");
+  log(`  ${C.dim}SOR routing finds the best price — execute swap actually sends the transaction on Base.${C.reset}`);
+  log(`  ${C.dim}Requires a Fluid wallet (agent key) to sign and broadcast the swap.${C.reset}\n`);
+
+  let keyName = null;
+  let agentKey = null;
+  let privateKeyJson = null;
+
+  if (await ask("Enable execute swap? (sets up your Fluid wallet automatically)")) {
+    log(`\n  ${C.bold}${C.cyan}Setting up Fluid wallet for execute swap…${C.reset}\n`);
+    ({ keyName, agentKey, privateKeyJson } = await stepAccountAndKeys());
+    ok(`Fluid wallet ready — execute swap enabled`);
+  } else {
+    log(`  ${C.gray}Skipped — SOR routing only. Run \`fadp\` again any time to enable execute swap.${C.reset}`);
+  }
   nl();
 
-  // ── summary ─────────────────────────────────────────────────────────────────
+  // ── Step 4: Scaffold project ─────────────────────────────────────────────────
+  step(4, "Scaffold Project");
+  log(`  ${C.dim}Scaffolding fadp-sample/ — SOR server${agentKey ? " + execute swap" : " (routing only)"}.${C.reset}\n`);
+  scaffoldSampleProject(keyName, privateKeyJson, agentKey);
+  nl();
+
+  // ── Summary ──────────────────────────────────────────────────────────────────
   log(hr("═"));
-  log(`${C.bold}${C.green}  ✓  Project scaffolded!${C.reset}`);
+  log(`${C.bold}${C.green}  ✓  SOR project scaffolded!${C.reset}`);
   log(hr("═"));
+  nl();
+  log(`  ${C.bold}${C.white}What's included:${C.reset}`);
+  nl();
+  log(`  ${C.green}✓${C.reset}  SOR routing — best price across DEX venues`);
+  log(`  ${C.green}✓${C.reset}  Price feeds — ETH, BTC, SOL and 1000+ tokens`);
+  log(`  ${agentKey ? `${C.green}✓` : `${C.gray}○`}${C.reset}  Execute swap — sign + send on Base mainnet${agentKey ? "" : `  ${C.gray}(not enabled)${C.reset}`}`);
   nl();
   log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
   nl();
   log(`  ${C.cyan}[1]${C.reset}  ${C.bold}cd fadp-sample${C.reset}     ${C.dim}← enter your project${C.reset}`);
   log(`  ${C.cyan}[2]${C.reset}  ${C.bold}npm install${C.reset}         ${C.dim}← install dependencies${C.reset}`);
-  log(`  ${C.cyan}[3]${C.reset}  ${C.bold}node server.js${C.reset}      ${C.dim}← start gated API server${C.reset}`);
+  log(`  ${C.cyan}[3]${C.reset}  ${C.bold}node server.js${C.reset}      ${C.dim}← start SOR server${C.reset}`);
+  if (agentKey) {
+    log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node agent.js${C.reset}       ${C.dim}← run execute swap agent${C.reset}`);
+  }
   nl();
-  log(`  ${C.dim}Run \`fadp\` again and choose option 2 to add agent keys when ready.${C.reset}`);
+  if (agentKey) {
+    log(`  ${C.dim}FLUID_AGENT_KEY exported to shell — source ~/.zshrc to activate in this terminal${C.reset}`);
+  }
   log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
   nl();
 
