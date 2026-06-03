@@ -344,6 +344,138 @@ async function generateFLDPKeyPair(email) {
   return { keyName, publicKeyPem: publicKey, privateKeyPem: privateKey, privateKeyJson };
 }
 
+// ─── secp256k1 + BIP-39/32/44 (pure Node.js built-ins, no external deps) ────
+
+const _P  = BigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F");
+const _N  = BigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+const _Gx = BigInt("0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798");
+const _Gy = BigInt("0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8");
+
+function _modp(a)  { return ((a % _P) + _P) % _P; }
+function _modn(a)  { return ((a % _N) + _N) % _N; }
+function _inv(a, m) {
+  let [r, nr, s, ns] = [m, ((a % m) + m) % m, 0n, 1n];
+  while (ns !== 0n) { const q = r / ns; [r, nr, s, ns] = [ns, r - q * ns, ns, s - q * ns]; }
+  return ((s % m) + m) % m;
+}
+function _ptAdd(x1, y1, x2, y2) {
+  if (x1 === null) return [x2, y2];
+  if (x2 === null) return [x1, y1];
+  if (x1 === x2 && y1 === y2) {
+    const lam = _modp(3n * x1 * x1 * _inv(2n * y1, _P));
+    const x3  = _modp(lam * lam - 2n * x1);
+    return [x3, _modp(lam * (x1 - x3) - y1)];
+  }
+  const lam = _modp((y2 - y1) * _inv(x2 - x1, _P));
+  const x3  = _modp(lam * lam - x1 - x2);
+  return [x3, _modp(lam * (x1 - x3) - y1)];
+}
+function _ptMul(k, x, y) {
+  let [rx, ry, cx, cy] = [null, null, x, y];
+  while (k > 0n) { if (k & 1n) [rx, ry] = _ptAdd(rx, ry, cx, cy); [cx, cy] = _ptAdd(cx, cy, cx, cy); k >>= 1n; }
+  return [rx, ry];
+}
+function _compPub(privBuf) {
+  const [x, y] = _ptMul(BigInt("0x" + privBuf.toString("hex")), _Gx, _Gy);
+  return Buffer.concat([Buffer.from([(y & 1n) === 0n ? 0x02 : 0x03]),
+    Buffer.from(x.toString(16).padStart(64, "0"), "hex")]);
+}
+function _addPriv(a, b) {
+  const s = _modn(BigInt("0x" + a.toString("hex")) + BigInt("0x" + b.toString("hex")));
+  return Buffer.from(s.toString(16).padStart(64, "0"), "hex");
+}
+function _bip32Master(seed) {
+  const I = crypto.createHmac("sha512", Buffer.from("Bitcoin seed")).update(seed).digest();
+  return { key: I.slice(0, 32), chain: I.slice(32) };
+}
+function _bip32Hard({ key, chain }, idx) {
+  const ib = Buffer.allocUnsafe(4); ib.writeUInt32BE(0x80000000 + idx);
+  const I  = crypto.createHmac("sha512", chain).update(Buffer.concat([Buffer.alloc(1), key, ib])).digest();
+  return { key: _addPriv(I.slice(0, 32), key), chain: I.slice(32) };
+}
+function _bip32Soft({ key, chain }, idx) {
+  const ib = Buffer.allocUnsafe(4); ib.writeUInt32BE(idx);
+  const I  = crypto.createHmac("sha512", chain).update(Buffer.concat([_compPub(key), ib])).digest();
+  return { key: _addPriv(I.slice(0, 32), key), chain: I.slice(32) };
+}
+function deriveEthPrivKey(mnemonic) {
+  const seed = crypto.pbkdf2Sync(mnemonic.normalize("NFKD"), Buffer.from("mnemonic"), 2048, 64, "sha512");
+  let n = _bip32Master(seed);
+  n = _bip32Hard(n, 44);   // 44'
+  n = _bip32Hard(n, 60);   // 60'
+  n = _bip32Hard(n, 0);    // 0'
+  n = _bip32Soft(n, 0);    // 0
+  n = _bip32Soft(n, 0);    // 0
+  return "0x" + n.key.toString("hex");
+}
+
+// ─── Developer wallet setup (fw_sor_ key + seed phrase → .env.local) ─────────
+
+async function stepDeveloperWalletSetup() {
+  step("API Key", "Fluid API Key  (fw_sor_...)");
+  log(`  ${C.dim}Get your key at: ${C.reset}${C.cyan}fluidnative.com${C.reset}${C.dim} → Developer Console → API Keys${C.reset}`);
+  nl();
+
+  let apiKey = "";
+  while (true) {
+    apiKey = (await prompt(`Fluid API key ${C.gray}(fw_sor_...)${C.reset}`)).trim();
+    if (apiKey.startsWith("fw_sor_")) break;
+    warn("Must start with fw_sor_ — get it at fluidnative.com → Developer Console → API Keys");
+  }
+  ok(`API key accepted  ${C.dim}${apiKey.slice(0, 13)}${"•".repeat(8)}${C.reset}`);
+  nl();
+
+  step("Wallet", "Signing Key  (BIP-44 m/44'/60'/0'/0/0)");
+  log(`  ${C.dim}Your seed phrase derives your wallet signing key.${C.reset}`);
+  log(`  ${C.dim}It is ${C.reset}${C.bold}never echoed, never written to disk.${C.reset}${C.dim} Only the derived private key is saved to ${C.reset}${C.cyan}.env.local${C.reset}${C.dim}.${C.reset}`);
+  nl();
+
+  let privateKey = null;
+  while (true) {
+    const mnemonic = await promptPassword("Seed phrase (12 or 24 words, space-separated)");
+    const words = mnemonic.trim().split(/\s+/);
+    if (words.length !== 12 && words.length !== 24) {
+      warn(`Got ${words.length} words — seed phrase must be exactly 12 or 24 words`);
+      continue;
+    }
+    try {
+      privateKey = deriveEthPrivKey(mnemonic);
+      ok(`Signing key derived  ${C.dim}(m/44'/60'/0'/0/0 — seed phrase discarded)${C.reset}`);
+      break;
+    } catch (e) {
+      warn(`Derivation failed: ${e.message} — check your seed phrase and try again`);
+    }
+  }
+  nl();
+
+  // Write ONLY the private key + API key to .env.local — seed phrase never persisted
+  const envPath = path.join(process.cwd(), ".env.local");
+  const marker  = "# Fluid SOR — generated by @fluidwallet/fadp-cli";
+  const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+  if (!existing.includes(marker)) {
+    fs.appendFileSync(envPath, [
+      "", marker,
+      `FLUID_API_KEY="${apiKey}"`,
+      `WALLET_PRIVATE_KEY="${privateKey}"`,
+      `FLUID_API_URL="${API_BASE}"`,
+      "",
+    ].join("\n"));
+  }
+
+  // Ensure .env.local is gitignored
+  const giPath   = path.join(process.cwd(), ".gitignore");
+  const giText   = fs.existsSync(giPath) ? fs.readFileSync(giPath, "utf8") : "";
+  if (!giText.includes(".env.local")) {
+    fs.appendFileSync(giPath, "\n.env.local\n");
+    ok(`.env.local added to ${C.cyan}.gitignore${C.reset}`);
+  }
+
+  ok(`Keys written to ${C.cyan}.env.local${C.reset}  ${C.dim}(private key only — seed phrase never stored)${C.reset}`);
+  nl();
+
+  return { apiKey, privateKey };
+}
+
 // ─── 20 Agent Skills ──────────────────────────────────────────────────────────
 
 const AGENT_SKILLS = [
@@ -1007,15 +1139,15 @@ async function ask(question) {
   return ans === "" || ans.toLowerCase() === "y" || ans.toLowerCase() === "yes";
 }
 
-// ─── Mode 1: Install SOR in existing DeFi project (no wallet needed) ──────────
+// ─── Mode 1: Install SOR in existing DeFi project ─────────────────────────────
 
 async function runModeInstallDeFi() {
   log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Install SOR in existing DeFi project${C.reset}\n`);
-  log(`  ${C.dim}Adds SOR routing and price feeds to your project. No Fluid wallet needed.${C.reset}\n`);
+  log(`  ${C.dim}SOR routing works without a wallet. A wallet is needed to execute swaps on-chain.${C.reset}\n`);
 
   const installed = [];
 
-  // ── fluid-fadp ──────────────────────────────────────────────────────────────
+  // ── Step 1: fluid-fadp ──────────────────────────────────────────────────────
   step(1, "fluid-fadp  (SOR routing + FADP/1.0 middleware)");
   log(`  ${C.dim}Smart order routing across DEX venues + HTTP 402 payment gating.${C.reset}\n`);
   if (await ask("Install fluid-fadp?")) {
@@ -1027,7 +1159,7 @@ async function runModeInstallDeFi() {
   } else { log(`  ${C.gray}Skipped.${C.reset}`); }
   nl();
 
-  // ── fluid-ticker ────────────────────────────────────────────────────────────
+  // ── Step 2: fluid-ticker ────────────────────────────────────────────────────
   step(2, "fluid-ticker  (live crypto price aggregator)");
   log(`  ${C.dim}11-source price oracle — ETH, BTC, SOL and 1000+ tokens.${C.reset}\n`);
   if (await ask("Install fluid-ticker?")) {
@@ -1039,15 +1171,39 @@ async function runModeInstallDeFi() {
   } else { log(`  ${C.gray}Skipped.${C.reset}`); }
   nl();
 
-  // ── summary ─────────────────────────────────────────────────────────────────
+  // ── Step 3: Wallet setup (fw_sor_ key + seed phrase) ────────────────────────
+  step(3, "Wallet Setup  (required for execute swap)");
+  log(`  ${C.dim}SOR routing works now. To also execute swaps on-chain, set up your wallet.${C.reset}`);
+  log(`  ${C.dim}You'll need your ${C.reset}${C.cyan}fw_sor_...${C.dim} API key and your seed phrase.${C.reset}`);
+  log(`  ${C.dim}Seed phrase derives your signing key in-process — never stored.${C.reset}\n`);
+
+  let walletSetup = null;
+  if (await ask("Set up wallet for execute swap? (requires fw_sor_ key + seed phrase)")) {
+    walletSetup = await stepDeveloperWalletSetup();
+    installed.push("wallet");
+  } else {
+    log(`  ${C.gray}Skipped — SOR routing only. Run \`fadp\` again any time to add wallet.${C.reset}`);
+  }
+  nl();
+
+  // ── Summary ──────────────────────────────────────────────────────────────────
   log(hr("═"));
   log(`${C.bold}${C.green}  ✓  SOR ready in your project!${C.reset}`);
   log(hr("═"));
+  nl();
+  log(`  ${C.bold}${C.white}What's ready:${C.reset}`);
+  nl();
+  log(`  ${C.green}✓${C.reset}  SOR routing — best price across DEX venues`);
+  log(`  ${C.green}✓${C.reset}  Price feeds — ETH, BTC, SOL and 1000+ tokens`);
+  log(`  ${walletSetup ? `${C.green}✓` : `${C.gray}○`}${C.reset}  Execute swap — sign + send on Base mainnet${walletSetup ? "" : `  ${C.gray}(not set up)${C.reset}`}`);
   nl();
   log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
   nl();
   log(`  ${C.cyan}[1]${C.reset}  ${C.bold}code .${C.reset}                              ${C.dim}← open project in VS Code${C.reset}`);
   log(`  ${C.cyan}[2]${C.reset}  ${C.bold}import { SOR } from 'fluid-fadp'${C.reset}    ${C.dim}← start routing swaps${C.reset}`);
+  if (walletSetup) {
+    log(`  ${C.cyan}[3]${C.reset}  ${C.bold}require('dotenv').config({ path: '.env.local' })${C.reset}  ${C.dim}← load wallet key${C.reset}`);
+  }
   nl();
   log(`  ${C.dim}Installed: ${installed.length ? installed.join(", ") : "none"}${C.reset}`);
   log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
@@ -1145,14 +1301,12 @@ async function runModeScaffoldDev() {
   log(`  ${C.dim}SOR routing finds the best price — execute swap actually sends the transaction on Base.${C.reset}`);
   log(`  ${C.dim}Requires a Fluid wallet (agent key) to sign and broadcast the swap.${C.reset}\n`);
 
-  let keyName = null;
-  let agentKey = null;
-  let privateKeyJson = null;
+  let walletSetup = null;
 
-  if (await ask("Enable execute swap? (sets up your Fluid wallet automatically)")) {
-    log(`\n  ${C.bold}${C.cyan}Setting up Fluid wallet for execute swap…${C.reset}\n`);
-    ({ keyName, agentKey, privateKeyJson } = await stepAccountAndKeys());
-    ok(`Fluid wallet ready — execute swap enabled`);
+  if (await ask("Enable execute swap? (requires fw_sor_ API key + seed phrase)")) {
+    log(`\n  ${C.dim}Your seed phrase derives your signing key in-process — never echoed or stored.${C.reset}\n`);
+    walletSetup = await stepDeveloperWalletSetup();
+    ok(`Wallet ready — execute swap enabled`);
   } else {
     log(`  ${C.gray}Skipped — SOR routing only. Run \`fadp\` again any time to enable execute swap.${C.reset}`);
   }
@@ -1160,8 +1314,8 @@ async function runModeScaffoldDev() {
 
   // ── Step 4: Scaffold project ─────────────────────────────────────────────────
   step(4, "Scaffold Project");
-  log(`  ${C.dim}Scaffolding fadp-sample/ — SOR server${agentKey ? " + execute swap" : " (routing only)"}.${C.reset}\n`);
-  scaffoldSampleProject(keyName, privateKeyJson, agentKey);
+  log(`  ${C.dim}Scaffolding fadp-sample/ — SOR server${walletSetup ? " + execute swap" : " (routing only)"}.${C.reset}\n`);
+  scaffoldSampleProject(null, null, null);
   nl();
 
   // ── Summary ──────────────────────────────────────────────────────────────────
@@ -1173,19 +1327,19 @@ async function runModeScaffoldDev() {
   nl();
   log(`  ${C.green}✓${C.reset}  SOR routing — best price across DEX venues`);
   log(`  ${C.green}✓${C.reset}  Price feeds — ETH, BTC, SOL and 1000+ tokens`);
-  log(`  ${agentKey ? `${C.green}✓` : `${C.gray}○`}${C.reset}  Execute swap — sign + send on Base mainnet${agentKey ? "" : `  ${C.gray}(not enabled)${C.reset}`}`);
+  log(`  ${walletSetup ? `${C.green}✓` : `${C.gray}○`}${C.reset}  Execute swap — sign + send on Base mainnet${walletSetup ? "" : `  ${C.gray}(not enabled)${C.reset}`}`);
   nl();
   log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
   nl();
   log(`  ${C.cyan}[1]${C.reset}  ${C.bold}cd fadp-sample${C.reset}     ${C.dim}← enter your project${C.reset}`);
   log(`  ${C.cyan}[2]${C.reset}  ${C.bold}npm install${C.reset}         ${C.dim}← install dependencies${C.reset}`);
   log(`  ${C.cyan}[3]${C.reset}  ${C.bold}node server.js${C.reset}      ${C.dim}← start SOR server${C.reset}`);
-  if (agentKey) {
+  if (walletSetup) {
     log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node agent.js${C.reset}       ${C.dim}← run execute swap agent${C.reset}`);
   }
   nl();
-  if (agentKey) {
-    log(`  ${C.dim}FLUID_AGENT_KEY exported to shell — source ~/.zshrc to activate in this terminal${C.reset}`);
+  if (walletSetup) {
+    log(`  ${C.dim}Wallet key in ${C.reset}${C.cyan}.env.local${C.dim} — load with dotenv({ path: '.env.local' })${C.reset}`);
   }
   log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
   nl();
