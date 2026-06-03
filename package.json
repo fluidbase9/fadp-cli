@@ -1,6 +1,6 @@
 {
   "name": "@fluidwallet/fadp-cli",
-  "version": "1.6.10",
+  "version": "1.7.0",
   "description": "FADP Developer Setup CLI — built for the agent economy. MCP compatible. Know Your Agent (KYA) identity via UAI + Pauli Keys. Register your developer account, generate EC key pair, and scaffold agent skills on Base.",
   "bin": {
     "fadp": "./bin/fadp-init.js"
