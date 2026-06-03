@@ -641,7 +641,7 @@ async function selectMode() {
   const modes = [
     {
       key:   "1",
-      title: `${C.bold}${C.cyan}Install FADP in my existing project${C.reset}`,
+      title: `${C.bold}${C.cyan}Install SOR in my existing project${C.reset}`,
       desc:  `${C.gray}Generate keys + add fluid-fadp to package.json. No sample project.${C.reset}`,
     },
     {
@@ -992,7 +992,7 @@ async function ask(question) {
 // ─── Mode 1: install only (interactive per-component) ─────────────────────────
 
 async function runModeInstall() {
-  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Install FADP in existing project${C.reset}\n`);
+  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Install SOR in existing project${C.reset}\n`);
   log(`  ${C.dim}You'll be asked about each component. Press Enter to accept default [Y].${C.reset}\n`);
 
   const { keyName, agentKey, privateKeyJson } = await stepAccountAndKeys();
