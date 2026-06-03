@@ -659,9 +659,9 @@ async function selectMode() {
     },
     {
       key:      "d",
-      title:    `${C.bold}${C.white}SOR scaffold for agents${C.reset}`,
+      title:    `${C.bold}${C.gray}SOR scaffold for agents${C.reset}  ${C.yellow}(coming soon)${C.reset}`,
       desc:     `${C.gray}Wallet auto-setup + agent skills + full sample project ready to run.${C.reset}`,
-      disabled: false,
+      disabled: true,
     },
   ];
 
@@ -675,9 +675,10 @@ async function selectMode() {
 
   while (true) {
     const ans = (await prompt(`Choose ${C.cyan}a${C.reset}, ${C.cyan}b${C.reset}, ${C.cyan}c${C.reset} or ${C.cyan}d${C.reset}`)).toLowerCase().trim();
-    if (ans === "c") { warn("SOR for agents is coming soon — choose a, b or d"); continue; }
-    if (["a","b","d"].includes(ans)) return ans;
-    warn("Enter a, b or d");
+    if (ans === "c") { warn("SOR for agents is coming soon — choose a or b"); continue; }
+    if (ans === "d") { warn("SOR scaffold for agents is coming soon — choose a or b"); continue; }
+    if (["a","b"].includes(ans)) return ans;
+    warn("Enter a or b");
   }
 }
 
