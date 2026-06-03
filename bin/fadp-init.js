@@ -995,7 +995,18 @@ async function runModeInstall() {
   log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Install SOR in existing project${C.reset}\n`);
   log(`  ${C.dim}You'll be asked about each component. Press Enter to accept default [Y].${C.reset}\n`);
 
-  const { keyName, agentKey, privateKeyJson } = await stepAccountAndKeys();
+  log(`  ${C.dim}SOR (Smart Order Routing) works standalone — no Fluid wallet required.${C.reset}`);
+  log(`  ${C.dim}A Fluid account adds agent keys for FADP payments and swaps on Base.${C.reset}`);
+  nl();
+  let keyName = null;
+  let agentKey = null;
+  let privateKeyJson = null;
+  if (await ask("Set up a Fluid developer account + agent key? (optional)")) {
+    ({ keyName, agentKey, privateKeyJson } = await stepAccountAndKeys());
+  } else {
+    log(`  ${C.gray}Skipping Fluid account setup — you can run \`fadp\` again any time to add it.${C.reset}`);
+    nl();
+  }
 
   let stepNum = 4;
   const installed = [];
@@ -1094,7 +1105,19 @@ async function runModeInstall() {
 async function runModeProject() {
   log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Scaffold full TypeScript project${C.reset}\n`);
 
-  const { email, keyName, agentKey, privateKeyJson } = await stepAccountAndKeys();
+  log(`  ${C.dim}A Fluid account adds agent keys for FADP payments and swaps on Base.${C.reset}`);
+  log(`  ${C.dim}You can skip this and add keys later with \`fadp\`.${C.reset}`);
+  nl();
+  let email = null;
+  let keyName = null;
+  let agentKey = null;
+  let privateKeyJson = null;
+  if (await ask("Set up a Fluid developer account + agent key? (optional)")) {
+    ({ email, keyName, agentKey, privateKeyJson } = await stepAccountAndKeys());
+  } else {
+    log(`  ${C.gray}Skipping Fluid account setup — run \`fadp\` again any time to add it.${C.reset}`);
+    nl();
+  }
 
   step(3, "Clone Agent Skills Repo");
   log(`  ${C.dim}Repo: ${SKILLS_REPO}${C.reset}`);
