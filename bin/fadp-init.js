@@ -641,26 +641,38 @@ async function selectMode() {
   const modes = [
     {
       key:   "1",
-      title: `${C.bold}${C.cyan}Install SOR in my existing project${C.reset}`,
-      desc:  `${C.gray}Generate keys + add fluid-fadp to package.json. No sample project.${C.reset}`,
+      title: `${C.bold}${C.cyan}Install SOR in my existing DeFi project${C.reset}`,
+      desc:  `${C.gray}Add SOR routing + price feeds to your project. No wallet needed.${C.reset}`,
     },
     {
       key:   "2",
-      title: `${C.bold}${C.white}Scaffold a full TypeScript project${C.reset}`,
-      desc:  `${C.gray}Keys + agent skills + sample server/agent project ready to run.${C.reset}`,
+      title: `${C.bold}${C.cyan}SOR for agents${C.reset}`,
+      desc:  `${C.gray}Auto-setup Fluid wallet + install SOR skills into your existing agent.${C.reset}`,
+    },
+    {
+      key:   "3",
+      title: `${C.bold}${C.white}Scaffold a full TypeScript project  (developer)${C.reset}`,
+      desc:  `${C.gray}Sample server + SOR integration scaffolded and ready to run.${C.reset}`,
+    },
+    {
+      key:   "4",
+      title: `${C.bold}${C.white}Scaffold a full TypeScript project  (agents)${C.reset}`,
+      desc:  `${C.gray}Wallet auto-setup + agent skills + full sample project ready to run.${C.reset}`,
     },
   ];
 
   log(`  ${C.bold}What would you like to do?${C.reset}`);
   nl();
-  for (const m of modes) log(`  ${C.cyan}[${m.key}]${C.reset}  ${m.title}`);
-  for (const m of modes) log(`       ${m.desc}`);
-  nl();
+  for (const m of modes) {
+    log(`  ${C.cyan}[${m.key}]${C.reset}  ${m.title}`);
+    log(`       ${m.desc}`);
+    nl();
+  }
 
   while (true) {
-    const ans = await prompt(`Choose ${C.cyan}1${C.reset} or ${C.cyan}2${C.reset}`);
-    if (ans === "1" || ans === "2") return ans;
-    warn("Enter 1 or 2");
+    const ans = await prompt(`Choose ${C.cyan}1${C.reset}, ${C.cyan}2${C.reset}, ${C.cyan}3${C.reset} or ${C.cyan}4${C.reset}`);
+    if (["1","2","3","4"].includes(ans)) return ans;
+    warn("Enter 1, 2, 3 or 4");
   }
 }
 
@@ -989,31 +1001,17 @@ async function ask(question) {
   return ans === "" || ans.toLowerCase() === "y" || ans.toLowerCase() === "yes";
 }
 
-// ─── Mode 1: install only (interactive per-component) ─────────────────────────
+// ─── Mode 1: Install SOR in existing DeFi project (no wallet needed) ──────────
 
-async function runModeInstall() {
-  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Install SOR in existing project${C.reset}\n`);
-  log(`  ${C.dim}You'll be asked about each component. Press Enter to accept default [Y].${C.reset}\n`);
+async function runModeInstallDeFi() {
+  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Install SOR in existing DeFi project${C.reset}\n`);
+  log(`  ${C.dim}Adds SOR routing and price feeds to your project. No Fluid wallet needed.${C.reset}\n`);
 
-  log(`  ${C.dim}SOR (Smart Order Routing) works standalone — no Fluid wallet required.${C.reset}`);
-  log(`  ${C.dim}A Fluid account adds agent keys for FADP payments and swaps on Base.${C.reset}`);
-  nl();
-  let keyName = null;
-  let agentKey = null;
-  let privateKeyJson = null;
-  if (await ask("Set up a Fluid developer account + agent key? (optional)")) {
-    ({ keyName, agentKey, privateKeyJson } = await stepAccountAndKeys());
-  } else {
-    log(`  ${C.gray}Skipping Fluid account setup — you can run \`fadp\` again any time to add it.${C.reset}`);
-    nl();
-  }
-
-  let stepNum = 4;
   const installed = [];
 
   // ── fluid-fadp ──────────────────────────────────────────────────────────────
-  step(stepNum++, "fluid-fadp  (FADP/1.0 payment gate middleware)");
-  log(`  ${C.dim}Adds HTTP 402 payment gating to your Express routes.${C.reset}\n`);
+  step(1, "fluid-fadp  (SOR routing + FADP/1.0 middleware)");
+  log(`  ${C.dim}Smart order routing across DEX venues + HTTP 402 payment gating.${C.reset}\n`);
   if (await ask("Install fluid-fadp?")) {
     try {
       execSync("npm install fluid-fadp", { stdio: "pipe", cwd: process.cwd() });
@@ -1024,7 +1022,7 @@ async function runModeInstall() {
   nl();
 
   // ── fluid-ticker ────────────────────────────────────────────────────────────
-  step(stepNum++, "fluid-ticker  (live crypto price aggregator)");
+  step(2, "fluid-ticker  (live crypto price aggregator)");
   log(`  ${C.dim}11-source price oracle — ETH, BTC, SOL and 1000+ tokens.${C.reset}\n`);
   if (await ask("Install fluid-ticker?")) {
     try {
@@ -1035,9 +1033,33 @@ async function runModeInstall() {
   } else { log(`  ${C.gray}Skipped.${C.reset}`); }
   nl();
 
+  // ── summary ─────────────────────────────────────────────────────────────────
+  log(hr("═"));
+  log(`${C.bold}${C.green}  ✓  SOR ready in your project!${C.reset}`);
+  log(hr("═"));
+  nl();
+  log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
+  nl();
+  log(`  ${C.cyan}[1]${C.reset}  ${C.bold}code .${C.reset}                              ${C.dim}← open project in VS Code${C.reset}`);
+  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}import { SOR } from 'fluid-fadp'${C.reset}    ${C.dim}← start routing swaps${C.reset}`);
+  nl();
+  log(`  ${C.dim}Installed: ${installed.length ? installed.join(", ") : "none"}${C.reset}`);
+  log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
+  nl();
+}
+
+// ─── Mode 2: SOR for agents (wallet auto-setup + agent skills) ─────────────
+
+async function runModeSORAgents() {
+  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}SOR for agents${C.reset}\n`);
+  log(`  ${C.dim}Sets up your Fluid wallet and installs SOR agent skills into your agent.${C.reset}\n`);
+
+  // wallet is required for agents to swap + pay
+  const { keyName, agentKey, privateKeyJson } = await stepAccountAndKeys();
+
   // ── agent skills ────────────────────────────────────────────────────────────
-  step(stepNum++, "Agent Skills  (send, swap, balance, price…)");
-  log(`  ${C.dim}54 agents supported — Universal (.agents/skills/) and dedicated dirs.${C.reset}\n`);
+  step(4, "Agent Skills  (swap, price, balance, send…)");
+  log(`  ${C.dim}54 agents supported — installs SOR skills directly into your agent.${C.reset}\n`);
   if (await ask("Install agent skills?")) {
     log(`  ${C.dim}Repo: ${SKILLS_REPO}${C.reset}`);
     cloneSkillsRepo();
@@ -1061,7 +1083,6 @@ async function runModeInstall() {
         const count = installSkillsForAgents(chosen, agentTargets, scope);
         nl();
         ok(`${C.bold}${count} installation${count === 1 ? "" : "s"} complete${C.reset}`);
-        installed.push("agent-skills");
       } else {
         warn("No agents selected.");
       }
@@ -1071,54 +1092,92 @@ async function runModeInstall() {
   } else { log(`  ${C.gray}Skipped.${C.reset}`); }
   nl();
 
-  // ── sample gated server snippet ─────────────────────────────────────────────
-  step(stepNum++, "Sample code  (gated server + paying agent)");
-  log(`  ${C.dim}Copies a ready-to-run server.js and agent.js into fadp-sample/.${C.reset}\n`);
-  if (await ask("Scaffold fadp-sample/ with example server + agent?")) {
-    scaffoldSampleProject(keyName);
-    installed.push("fadp-sample");
-  } else { log(`  ${C.gray}Skipped.${C.reset}`); }
-  nl();
-
   // ── summary ─────────────────────────────────────────────────────────────────
   log(hr("═"));
-  log(`${C.bold}${C.green}  ✓  FADP ready in your project!${C.reset}`);
+  log(`${C.bold}${C.green}  ✓  SOR agent setup complete!${C.reset}`);
   log(hr("═"));
   nl();
   log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
   nl();
-  log(`  ${C.cyan}[1]${C.reset}  ${C.bold}code .${C.reset}                       ${C.dim}← open this project in VS Code${C.reset}`);
-  if (installed.includes("fadp-sample")) {
-    log(`  ${C.cyan}[2]${C.reset}  ${C.bold}cd fadp-sample && npm install${C.reset}${C.dim}   ← install sample dependencies${C.reset}`);
-    log(`  ${C.cyan}[3]${C.reset}  ${C.bold}node fadp-sample/server.js${C.reset}   ${C.dim}← terminal 1: gated API server${C.reset}`);
-    log(`  ${C.cyan}[4]${C.reset}  ${C.bold}node fadp-sample/agent.js${C.reset}    ${C.dim}← terminal 2: paying agent${C.reset}`);
-  }
+  log(`  ${C.cyan}[1]${C.reset}  ${C.bold}source ~/.zshrc${C.reset}               ${C.dim}← activate FLUID_AGENT_KEY in this terminal${C.reset}`);
+  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}Fund wallet with USDC on Base${C.reset}  ${C.dim}← required for swaps + payments${C.reset}`);
   nl();
-  log(`  ${C.dim}Installed: ${installed.length ? installed.join(", ") : "none"}${C.reset}`);
-  log(`  ${C.dim}Skills in your agent's directory  ·  FLUID_AGENT_KEY exported to shell${C.reset}`);
+  log(`  ${C.dim}FLUID_AGENT_KEY exported to shell — all agents pick it up automatically${C.reset}`);
   log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
   nl();
 }
 
-// ─── Mode 2: full TypeScript project ─────────────────────────────────────────
+// ─── Mode 3: Scaffold for developers (no wallet needed) ───────────────────────
 
-async function runModeProject() {
-  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Scaffold full TypeScript project${C.reset}\n`);
+async function runModeScaffoldDev() {
+  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Scaffold TypeScript project  (developer)${C.reset}\n`);
+  log(`  ${C.dim}Creates a ready-to-run server + SOR integration. No Fluid wallet needed.${C.reset}\n`);
 
-  log(`  ${C.dim}A Fluid account adds agent keys for FADP payments and swaps on Base.${C.reset}`);
-  log(`  ${C.dim}You can skip this and add keys later with \`fadp\`.${C.reset}`);
+  // ── packages ────────────────────────────────────────────────────────────────
+  step(1, "fluid-fadp  (SOR routing + FADP/1.0 middleware)");
+  log(`  ${C.dim}Smart order routing across DEX venues + HTTP 402 payment gating.${C.reset}\n`);
+  if (await ask("Install fluid-fadp?")) {
+    try {
+      execSync("npm install fluid-fadp", { stdio: "pipe", cwd: process.cwd() });
+      ok(`${C.cyan}fluid-fadp${C.reset} installed`);
+    } catch { warn("npm install failed — run: npm install fluid-fadp"); }
+  } else { log(`  ${C.gray}Skipped.${C.reset}`); }
   nl();
-  let email = null;
-  let keyName = null;
-  let agentKey = null;
-  let privateKeyJson = null;
-  if (await ask("Set up a Fluid developer account + agent key? (optional)")) {
-    ({ email, keyName, agentKey, privateKeyJson } = await stepAccountAndKeys());
-  } else {
-    log(`  ${C.gray}Skipping Fluid account setup — run \`fadp\` again any time to add it.${C.reset}`);
-    nl();
-  }
 
+  step(2, "fluid-ticker  (live crypto price aggregator)");
+  log(`  ${C.dim}11-source price oracle — ETH, BTC, SOL and 1000+ tokens.${C.reset}\n`);
+  if (await ask("Install fluid-ticker?")) {
+    try {
+      execSync("npm install fluid-ticker", { stdio: "pipe", cwd: process.cwd() });
+      ok(`${C.cyan}fluid-ticker${C.reset} installed`);
+    } catch { warn("npm install failed — run: npm install fluid-ticker"); }
+  } else { log(`  ${C.gray}Skipped.${C.reset}`); }
+  nl();
+
+  // ── scaffold ────────────────────────────────────────────────────────────────
+  step(3, "Sample TypeScript Project");
+  log(`  ${C.dim}Scaffolding fadp-sample/ — gated API server + SOR integration.${C.reset}\n`);
+  scaffoldSampleProject(null, null, null);
+  nl();
+
+  // ── summary ─────────────────────────────────────────────────────────────────
+  log(hr("═"));
+  log(`${C.bold}${C.green}  ✓  Project scaffolded!${C.reset}`);
+  log(hr("═"));
+  nl();
+  log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
+  nl();
+  log(`  ${C.cyan}[1]${C.reset}  ${C.bold}cd fadp-sample${C.reset}     ${C.dim}← enter your project${C.reset}`);
+  log(`  ${C.cyan}[2]${C.reset}  ${C.bold}npm install${C.reset}         ${C.dim}← install dependencies${C.reset}`);
+  log(`  ${C.cyan}[3]${C.reset}  ${C.bold}node server.js${C.reset}      ${C.dim}← start gated API server${C.reset}`);
+  nl();
+  log(`  ${C.dim}Run \`fadp\` again and choose option 2 to add agent keys when ready.${C.reset}`);
+  log(`  ${C.dim}Docs: fluidnative.com/fadp${C.reset}`);
+  nl();
+
+  await pressEnter("Press ENTER to open fadp-sample/ in VS Code");
+  if (fs.existsSync(SAMPLE_DIR)) {
+    try {
+      const { spawn } = require("child_process");
+      spawn("code", [SAMPLE_DIR], { detached: true, stdio: "ignore" }).unref();
+      ok(`Opened ${C.cyan}fadp-sample/${C.reset} in VS Code`);
+    } catch {
+      ok(`Run:  ${C.bold}code fadp-sample${C.reset}  to open in VS Code`);
+    }
+  }
+  nl();
+}
+
+// ─── Mode 4: Scaffold for agents (wallet auto-setup + full project) ────────────
+
+async function runModeScaffoldAgents() {
+  log(`\n  ${C.dim}Mode: ${C.reset}${C.bold}Scaffold TypeScript project  (agents)${C.reset}\n`);
+  log(`  ${C.dim}Wallet auto-setup + agent skills + full sample project ready to run.${C.reset}\n`);
+
+  // wallet is required for agent swaps + payments
+  const { email, keyName, agentKey, privateKeyJson } = await stepAccountAndKeys();
+
+  // ── agent skills ────────────────────────────────────────────────────────────
   step(3, "Clone Agent Skills Repo");
   log(`  ${C.dim}Repo: ${SKILLS_REPO}${C.reset}`);
   nl();
@@ -1152,6 +1211,7 @@ async function runModeProject() {
     }
   }
 
+  // ── scaffold ────────────────────────────────────────────────────────────────
   step(5, "Sample TypeScript Project");
   log(`  ${C.dim}Scaffolding fadp-sample/ — gated API server + paying agent.${C.reset}`);
   nl();
@@ -1159,15 +1219,15 @@ async function runModeProject() {
   nl();
 
   log(hr("═"));
-  log(`${C.bold}${C.green}  ✓  FADP project ready!${C.reset}`);
+  log(`${C.bold}${C.green}  ✓  Agent project ready!${C.reset}`);
   log(hr("═"));
   nl();
 
-  // ── Agent wallet balance + funding check (shown BEFORE VS Code opens) ────────
-  const MIN_USDC    = 0.01;
-  const keyForBal   = agentKey || process.env.FLUID_AGENT_KEY;
-  let   walletAddr  = null;
-  let   usdcBalance = 0;
+  // ── wallet balance + funding check ────────────────────────────────────────
+  const MIN_USDC  = 0.01;
+  const keyForBal = agentKey || process.env.FLUID_AGENT_KEY;
+  let walletAddr  = null;
+  let usdcBalance = 0;
 
   log(`  ${C.bold}${C.cyan}Agent Wallet  ·  Base mainnet${C.reset}`);
   log(`  ${C.dim}${"─".repeat(44)}${C.reset}`);
@@ -1198,7 +1258,6 @@ async function runModeProject() {
   } else {
     log(`  ${C.gray}No agent key found — run CLI again to generate one${C.reset}`);
   }
-
   nl();
 
   if (usdcBalance < MIN_USDC) {
@@ -1221,7 +1280,7 @@ async function runModeProject() {
     nl();
   }
 
-  // ── Next steps ────────────────────────────────────────────────────────────────
+  // ── next steps ────────────────────────────────────────────────────────────
   log(`  ${C.bold}${C.white}Next steps:${C.reset}`);
   nl();
   log(`  ${C.cyan}[1]${C.reset}  ${C.bold}cd fadp-sample${C.reset}              ${C.dim}← enter your project${C.reset}`);
@@ -1234,8 +1293,6 @@ async function runModeProject() {
   nl();
 
   await pressEnter("Press ENTER to open fadp-sample/ in VS Code");
-
-  // Auto-open VS Code
   if (fs.existsSync(SAMPLE_DIR)) {
     try {
       const { spawn } = require("child_process");
@@ -1253,8 +1310,10 @@ async function runModeProject() {
 async function main() {
   await banner();
   const mode = await selectMode();
-  if (mode === "1") await runModeInstall();
-  else              await runModeProject();
+  if      (mode === "1") await runModeInstallDeFi();
+  else if (mode === "2") await runModeSORAgents();
+  else if (mode === "3") await runModeScaffoldDev();
+  else                   await runModeScaffoldAgents();
 }
 
 main().catch(e => {
